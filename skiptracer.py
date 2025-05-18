@@ -127,3 +127,32 @@ def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -
             })
     page.close()
     return results
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Autonomous skip tracing tool")
+    parser.add_argument("address", help="Property address")
+    parser.add_argument("--debug", action="store_true", help="Save HTML and log status codes")
+    parser.add_argument("--visible", action="store_true", help="Show browser during scrape")
+    parser.add_argument("--inspect", action="store_true", help="Print raw HTML card text")
+    parser.add_argument("--save", action="store_true", help="Write results to results.json")
+    args = parser.parse_args()
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=not args.visible)
+        context = browser.new_context(user_agent=random.choice(USER_AGENTS), viewport={"width": 1366, "height": 768})
+
+        results = search_truepeoplesearch(context, args.address, args.debug, args.inspect)
+
+        context.close()
+        browser.close()
+
+    if args.save:
+        Path("results.json").write_text(json.dumps(results, indent=2))
+
+    if results:
+        print(json.dumps(results, indent=2))
+    else:
+        print("No matches found for this address.")
+
+if __name__ == "__main__":
+    main()
