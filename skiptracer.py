@@ -54,8 +54,6 @@ def apply_stealth(page) -> None:
         """
     )
 
-
-
 def random_mouse_movement(page, width: int = 1366, height: int = 768) -> None:
     for _ in range(random.randint(5, 10)):
         x = random.randint(0, width)
@@ -90,7 +88,7 @@ def fetch_html(context, url: str, debug: bool) -> str:
     for _ in range(random.randint(1, 2)):
         page.mouse.wheel(0, random.randint(200, 800))
         time.sleep(random.uniform(0.2, 0.5))
- 
+
     time.sleep(random.uniform(0.3, 0.7))
     html = page.content()
     if debug:
@@ -99,9 +97,6 @@ def fetch_html(context, url: str, debug: bool) -> str:
         raise ValueError(f"HTTP {response.status}")
     page.close()
     return html
-
-
-
 
 def random_mouse_movement(page, times: int | None = None) -> None:
     """Move the mouse around randomly to appear more human."""
@@ -146,6 +141,7 @@ def create_context(p, visible: bool, proxy: str | None) -> tuple:
     )
     return browser, context
 
+
 def search_truepeoplesearch(
     context,
     address: str,
@@ -176,10 +172,13 @@ def search_truepeoplesearch(
         street, city_state = [part.strip() for part in address.split(",", 1)]
 
     try:
+      
      try:
         street, cityzip = address.split(",", 1)
     except ValueError:
         street, cityzip = address, ""
+
+    try:
 
         address_input = page.locator("input[placeholder*='Enter name']").first
         city_input = page.locator("input[placeholder*='City']").first
@@ -228,6 +227,7 @@ page.press("input[placeholder*='City']", "Enter")
         Path("logs/page_after_submit.html").write_text(html)
 
     lower_html = html.lower()
+
 if "press & hold" in lower_html:
     print("Press & Hold challenge detected")
     if manual and visible:
@@ -244,6 +244,7 @@ if "press & hold" in lower_html:
         or "robot check" in lower_html
 
 
+
         or "press & hold" in lower_html
         or ("verify" in lower_html and "robot" in lower_html)
     ):
@@ -254,6 +255,7 @@ if "press & hold" in lower_html:
                 bot_check = True
         except Exception:
             pass
+
 
 
 
@@ -274,6 +276,7 @@ if "press & hold" in lower_html:
         time.sleep(10)
         page.reload()
         page.wait_for_load_state("domcontentloaded")
+
 
         random_mouse_movement(page)
 
