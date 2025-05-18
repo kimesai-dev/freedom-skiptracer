@@ -5,19 +5,27 @@ sources for phone numbers associated with a property address. It uses
 Playwright with a headless Chromium browser to better mimic real browsers and
 avoid simple anti-bot protections.
 
-## Usage
+## Installation
 
+Install the dependencies with pip:
+
+```bash
+pip install -r requirements.txt
+Usage
 
 python skiptracer.py "709 W High St, Portland, IN"
 Optional flags:
---visible        # show the browser instead of running headless
---proxy URL      # launch the browser using a proxy
---debug          # save the last fetched HTML to logs/debug_last.html
-Use --debug to print verbose logs and save the last HTML response to
-logs/debug_last.html when a request fails or is blocked.
+--debug
+Save the last HTML response to logs/debug_last.html
+--visible
+Launch the browser in non-headless mode
+--proxy URL
+Launch the browser using a proxy (e.g., http://user:pass@host:port)
+Use --debug to print verbose logs and save the last HTML response to logs/debug_last.html when a request fails or is blocked.
 
-The script will attempt to look up matches on TruePeopleSearch.com and
-FastPeopleSearch.com and output a list of potential matches in the form:
+Output Format
+
+The script will attempt to look up matches on TruePeopleSearch.com and FastPeopleSearch.com and output a list of potential matches in the form:
 
 [
   {
@@ -25,16 +33,18 @@ FastPeopleSearch.com and output a list of potential matches in the form:
     "phones": ["+1 (260) 555-1234"],
     "city_state": "Portland, IN",
     "source": "TruePeopleSearch"
-  },
-  ...
+  }
 ]
 Only publicly available information is queried and returned.
 
 
 ---
 
-✅ After pasting this:
-1. Click **“Mark as resolved”**
-2. Click **“Commit merge”**
+### 🧠 After that:
 
-Let me know if you want the updated `requirements.txt` or `skiptracer.py` next — you’re resolving this repo like a pro engineer.
+1. Save the file.
+2. In your terminal (still inside `freedom-skiptracer` folder), run:
+
+```bash
+git add README.md
+git commit -m "Resolve merge conflict in README"

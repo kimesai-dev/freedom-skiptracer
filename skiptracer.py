@@ -2,7 +2,20 @@ import argparse
 import json
 import random
 import re
+<<<<<< codex/build-skip-tracing-module-for-public-data-16yzpq
+import time
+import os
+from pathlib import Path
+from typing import Dict, List
+from urllib.parse import quote_plus
 
+try:
+    from bs4 import BeautifulSoup
+    from playwright.sync_api import sync_playwright
+except ImportError as exc:
+    missing = str(exc).split("'")[1]
+    print(f"Missing dependency: install with `pip install {missing}`")
+    raise SystemExit(1)
 
 PHONE_RE = re.compile(r"\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}")
 
@@ -60,12 +73,18 @@ def fetch_html(context, url: str, debug: bool) -> str:
 
 
 def search_truepeoplesearch(context, address: str, debug: bool) -> List[Dict[str, object]]:
-    print("Trying TruePeopleSearch...") if debug else None
+<<<<<< codex/build-skip-tracing-module-for-public-data-16yzpq
+    if debug:
+        print("Trying TruePeopleSearch...")
+
     url = "https://www.truepeoplesearch.com/results?streetaddress=" + address.replace(" ", "+")
     html = fetch_html(context, url, debug)
     soup = BeautifulSoup(html, "html.parser")
     cards = soup.select("div.card")
-    print(f"Found {len(cards)} cards on TruePeopleSearch") if debug else None
+<<<<<< codex/build-skip-tracing-module-for-public-data-16yzpq
+    if debug:
+        print(f"Found {len(cards)} cards on TruePeopleSearch")
+
     results = []
     for card in cards:
         name_el = card.find("a", href=re.compile("/details"))
@@ -86,13 +105,18 @@ def search_truepeoplesearch(context, address: str, debug: bool) -> List[Dict[str
 
 
 def search_fastpeoplesearch(context, address: str, debug: bool) -> List[Dict[str, object]]:
-    print("Trying FastPeopleSearch...") if debug else None
+<<<<<< codex/build-skip-tracing-module-for-public-data-16yzpq
+    if debug:
+        print("Trying FastPeopleSearch...")
     slug = address.lower().replace(",", "").replace(" ", "-")
     url = f"https://www.fastpeoplesearch.com/address/{slug}"
     html = fetch_html(context, url, debug)
     soup = BeautifulSoup(html, "html.parser")
     cards = soup.select("div.card")
-    print(f"Found {len(cards)} cards on FastPeopleSearch") if debug else None
+<<<<<<codex/build-skip-tracing-module-for-public-data-16yzpq
+    if debug:
+        print(f"Found {len(cards)} cards on FastPeopleSearch")
+
     results = []
     for card in cards:
         name_el = card.find("a", href=re.compile("/person"))
