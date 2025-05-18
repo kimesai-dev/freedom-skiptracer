@@ -36,9 +36,9 @@ def _parse_phones(text: str) -> List[str]:
         phones.add(_normalize_phone(match))
     return list(phones)
 
-def save_debug_html(html: str) -> None:
+def save_debug_html(html: str, name: str = "debug_last.html") -> None:
     Path("logs").mkdir(exist_ok=True)
-    Path("logs/debug_last.html").write_text(html)
+    Path(f"logs/{name}").write_text(html)
 
 def apply_stealth(page) -> None:
     page.add_init_script(
@@ -51,7 +51,6 @@ def apply_stealth(page) -> None:
     )
 
 def fetch_html(context, url: str, debug: bool) -> str:
-    """Navigate to a URL in a fresh page and return the HTML."""
     page = context.new_page()
     apply_stealth(page)
     response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -108,17 +107,18 @@ def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -
         page.wait_for_selector("div.card", timeout=8000)
     except Exception:
         pass
+
     page.mouse.wheel(0, random.randint(200, 800))
     html = page.content()
     if debug:
-        Path("logs").mkdir(exist_ok=True)
-        Path("logs/page_after_submit.html").write_text(html)
+        save_debug_html(html, name="page_after_submit.html")
 
     lower_html = html.lower()
     bot_check = False
     if (
         "are you a human" in lower_html
         or "robot check" in lower_html
+        or "press & hold" in lower_html
         or ("verify" in lower_html and "robot" in lower_html)
     ):
         bot_check = True
@@ -129,10 +129,17 @@ def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -
         except Exception:
             pass
 
+    if "press & hold to confirm you are a human" in lower_html:
+        print("Press & Hold challenge detected on TPS")
+        if debug or inspect:
+            page.pause()
+        page.close()
+        return []
+
     if bot_check:
         print("Bot check detected — waiting 10s and retrying...")
         if debug:
-            Path("logs/page_after_submit.html").write_text(html)
+            save_debug_html(html)
         page.pause()
         time.sleep(10)
         page.reload()
@@ -183,9 +190,7 @@ def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -
     page.close()
     return results
 
-
 def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -> List[Dict[str, object]]:
-    """Searches FastPeopleSearch for the given address."""
     if debug:
         print("Trying FastPeopleSearch...")
 
@@ -270,9 +275,7 @@ def main() -> None:
 
         if args.fast:
             try:
-                results.extend(
-                    search_fastpeoplesearch(context, args.address, args.debug, args.inspect)
-                )
+                results.extend(search_fastpeoplesearch(context, args.address, args.debug, args.inspect))
             except Exception as e:
                 if args.debug:
                     print(f"FastPeopleSearch failed: {e}")
