@@ -3,6 +3,7 @@ import sys
 import json
 from pathlib import Path
 from typing import List, Dict
+from urllib.parse import quote_plus
 
 try:
     import requests
@@ -11,8 +12,6 @@ except ImportError as e:
     missing = str(e).split("'")[1]
     print(f"Missing dependency: install with 'pip install {missing}'")
     sys.exit(1)
-
-from urllib.parse import quote_plus
 
 HEADERS = {
     "User-Agent": (
@@ -23,7 +22,6 @@ HEADERS = {
 }
 
 LOG_DIR = Path("logs")
-
 PHONE_RE = re.compile(r"\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}")
 
 
@@ -46,10 +44,12 @@ def search_truepeoplesearch(address: str, debug: bool = False) -> List[Dict[str,
     """Searches TruePeopleSearch for the given address."""
     if debug:
         print("Trying TruePeopleSearch...")
+
     url = (
         "https://www.truepeoplesearch.com/results?" +
         f"streetaddress={quote_plus(address)}"
     )
+
     try:
         resp = requests.get(url, headers=HEADERS, timeout=15)
         resp.raise_for_status()
@@ -57,8 +57,10 @@ def search_truepeoplesearch(address: str, debug: bool = False) -> List[Dict[str,
         if debug:
             print(f"Request failed: {e}")
         return []
+
     soup = BeautifulSoup(resp.text, "html.parser")
     cards = soup.select("div.card, div.result, div.results > div")
+
     if debug:
         print(f"Found {len(cards)} cards...")
         if len(cards) == 0:
@@ -66,6 +68,7 @@ def search_truepeoplesearch(address: str, debug: bool = False) -> List[Dict[str,
             debug_file = LOG_DIR / "debug_last.html"
             debug_file.write_text(resp.text)
             print(f"No cards found. Saved response to {debug_file}")
+
     results = []
     for card in cards:
         name_el = card.find("a", href=re.compile("/details"))
@@ -92,8 +95,10 @@ def search_fastpeoplesearch(address: str, debug: bool = False) -> List[Dict[str,
     """Searches FastPeopleSearch for the given address."""
     if debug:
         print("Trying FastPeopleSearch...")
+
     slug = quote_plus(address.lower().replace(",", "").replace(" ", "-"))
     url = f"https://www.fastpeoplesearch.com/address/{slug}"
+
     try:
         resp = requests.get(url, headers=HEADERS, timeout=15)
         resp.raise_for_status()
@@ -101,8 +106,10 @@ def search_fastpeoplesearch(address: str, debug: bool = False) -> List[Dict[str,
         if debug:
             print(f"Request failed: {e}")
         return []
+
     soup = BeautifulSoup(resp.text, "html.parser")
     cards = soup.select("div.card, div.result, div.results > div")
+
     if debug:
         print(f"Found {len(cards)} cards...")
         if len(cards) == 0:
@@ -110,6 +117,7 @@ def search_fastpeoplesearch(address: str, debug: bool = False) -> List[Dict[str,
             debug_file = LOG_DIR / "debug_last.html"
             debug_file.write_text(resp.text)
             print(f"No cards found. Saved response to {debug_file}")
+
     results = []
     for card in cards:
         name_el = card.find("a", href=re.compile("/person"))
