@@ -55,6 +55,7 @@ def apply_stealth(page) -> None:
     )
 
 
+
 def random_mouse_movement(page, width: int = 1366, height: int = 768) -> None:
     for _ in range(random.randint(5, 10)):
         x = random.randint(0, width)
@@ -98,6 +99,7 @@ def fetch_html(context, url: str, debug: bool) -> str:
         raise ValueError(f"HTTP {response.status}")
     page.close()
     return html
+
 
 
 def random_mouse_movement(page, times: int | None = None) -> None:
@@ -167,7 +169,13 @@ def search_truepeoplesearch(
         if debug:
             print("Failed to click Address tab")
 
+    street = address
+    city_state = ""
+    if "," in address:
+        street, city_state = [part.strip() for part in address.split(",", 1)]
+
     try:
+
         address_input = page.locator("input[placeholder*='Enter name']").first
         address_input.wait_for(timeout=5000)
         for ch in address:
@@ -176,7 +184,7 @@ def search_truepeoplesearch(
 
     except Exception:
         if debug:
-            print("Failed to locate or type into address input field")
+            print("Failed to locate or type into address fields")
         html = page.content()
         if debug:
             save_debug_html(html)
@@ -184,6 +192,7 @@ def search_truepeoplesearch(
         return []
 
     try:
+
         address_input.press("Enter")
         time.sleep(3)
     except Exception:
@@ -210,6 +219,7 @@ def search_truepeoplesearch(
         Path("logs/page_after_submit.html").write_text(html)
 
     lower_html = html.lower()
+
     if "press & hold" in lower_html:
         print("Press & Hold challenge detected")
         if manual and visible:
@@ -224,6 +234,7 @@ def search_truepeoplesearch(
     if (
         "are you a human" in lower_html
         or "robot check" in lower_html
+
 
         or "press & hold" in lower_html
         or ("verify" in lower_html and "robot" in lower_html)
@@ -253,6 +264,7 @@ def search_truepeoplesearch(
         time.sleep(10)
         page.reload()
         page.wait_for_load_state("domcontentloaded")
+
         random_mouse_movement(page)
         html = page.content()
         if debug:
