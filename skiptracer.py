@@ -24,6 +24,9 @@ USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:118.0) Gecko/20100101 Firefox/118.0",
 ]
+BOT_TRAP_TEXT = "Server Error in '/' Application."
+VIEWPORTS = [{"width": 1366, "height": 768}, {"width": 1920, "height": 1080}, {"width": 1600, "height": 900}]
+
 
 
 def _normalize_phone(number: str) -> str:
@@ -47,36 +50,50 @@ def save_debug_html(html: str) -> None:
 
 def apply_stealth(page) -> None:
     """Inject basic stealth scripts into the page."""
+
+    plugin_count = random.randint(3, 5)
+    hardware = random.choice([2, 4, 8])
+    touch = random.choice([0, 1])
     page.add_init_script(
-        """
-        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-        window.chrome = window.chrome || { runtime: {} };
-        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
-        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+        f"""
+        Object.defineProperty(navigator, 'webdriver', {{ get: () => undefined }});
+        window.chrome = window.chrome || {{ runtime: {{}} }};
+        Object.defineProperty(navigator, 'plugins', {{ get: () => new Array({{plugin_count}}).fill(1) }});
+        Object.defineProperty(navigator, 'languages', {{ get: () => ['en-US', 'en'] }});
+        Object.defineProperty(navigator, 'hardwareConcurrency', {{ get: () => {{hardware}} }});
+        Object.defineProperty(navigator, 'maxTouchPoints', {{ get: () => {{touch}} }});
         """
     )
 
-
-def fetch_html(context, url: str, debug: bool) -> str:
+def fetch_html(context, url: str, debug: bool, wait: float = 0.0) -> str:
     page = context.new_page()
     apply_stealth(page)
     response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
-    time.sleep(random.uniform(0.3, 0.7))
+    time.sleep(wait or random.uniform(0.3, 0.7))
     html = page.content()
     if debug:
         save_debug_html(html)
     if response and response.status >= 400:
-        raise ValueError(f"HTTP {response.status}")
+        if debug:
+            print(f"HTTP {response.status} — possible bot trap or error page.")
+        page.close()
+        return html
     page.close()
     return html
 
-
-def search_truepeoplesearch(context, address: str, debug: bool) -> List[Dict[str, object]]:
+def search_truepeoplesearch(context, address: str, wait: float, debug: bool) -> List[Dict[str, object]]:
     if debug:
         print("Trying TruePeopleSearch...")
 
     url = "https://www.truepeoplesearch.com/results?streetaddress=" + address.replace(" ", "+")
-    html = fetch_html(context, url, debug)
+    html = fetch_html(context, url, debug, wait)
+    if BOT_TRAP_TEXT in html:
+        if debug:
+            print("Bot trap detected, retrying...")
+        time.sleep(wait or random.uniform(1.0, 2.0))
+        html = fetch_html(context, url, debug, wait)
+        if BOT_TRAP_TEXT in html and debug:
+            print("Bot trap page persisted after retry.")
     soup = BeautifulSoup(html, "html.parser")
     cards = soup.select("div.card")
     if debug:
@@ -98,16 +115,13 @@ def search_truepeoplesearch(context, address: str, debug: bool) -> List[Dict[str
                 "city_state": location,
                 "source": "TruePeopleSearch",
             })
-    return results
-
-
-def search_fastpeoplesearch(context, address: str, debug: bool) -> List[Dict[str, object]]:
+def search_fastpeoplesearch(context, address: str, wait: float, debug: bool) -> List[Dict[str, object]]:
     if debug:
         print("Trying FastPeopleSearch...")
 
     slug = address.lower().replace(",", "").replace(" ", "-")
     url = f"https://www.fastpeoplesearch.com/address/{slug}"
-    html = fetch_html(context, url, debug)
+    html = fetch_html(context, url, debug, wait)
     soup = BeautifulSoup(html, "html.parser")
     cards = soup.select("div.card")
     if debug:
@@ -130,22 +144,33 @@ def search_fastpeoplesearch(context, address: str, debug: bool) -> List[Dict[str
                 "source": "FastPeopleSearch",
             })
     return results
-
-
-def skip_trace(address: str, visible: bool = False, proxy: str | None = None, debug: bool = False) -> List[Dict[str, object]]:
+def skip_trace(
+    address: str,
+    visible: bool = False,
+    proxy: str | None = None,
+    include_fastpeoplesearch: bool = False,
+    wait: float = 0.0,
+    debug: bool = False,
+) -> List[Dict[str, object]]:
     ua = random.choice(USER_AGENTS)
+    viewport = random.choice(VIEWPORTS)
     with sync_playwright() as p:
         launch_args = {"headless": not visible}
         if proxy:
             launch_args["proxy"] = {"server": proxy}
         browser = p.chromium.launch(**launch_args)
-        context = browser.new_context(user_agent=ua, viewport={"width": 1366, "height": 768})
-        results = search_truepeoplesearch(context, address, debug)
-        if not results:
-            results = search_fastpeoplesearch(context, address, debug)
+        context = browser.new_context(user_agent=ua, viewport=viewport)
+        results = search_truepeoplesearch(context, address, wait, debug)
+
+        if include_fastpeoplesearch:
+            try:
+                fps_results = search_fastpeoplesearch(context, address, wait, debug)
+                results.extend(fps_results)
+            except Exception as exc:  # pragma: no cover - network call
+                if debug:
+                    print(f"FastPeopleSearch failed: {exc}")
         browser.close()
     return results
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Free skip tracing")
@@ -153,9 +178,23 @@ def main() -> None:
     parser.add_argument("--debug", action="store_true", help="Save last HTML response")
     parser.add_argument("--visible", action="store_true", help="Run browser visibly")
     parser.add_argument("--proxy", help="Proxy server e.g. http://user:pass@host:port")
+    parser.add_argument("--fast", action="store_true", help="Include FastPeopleSearch (may trigger bot checks)")
+    parser.add_argument("--save", action="store_true", help="Write results to results.json")
+    parser.add_argument("--wait", type=float, default=0.0, help="Seconds to wait after each page load")
     args = parser.parse_args()
 
-    matches = skip_trace(args.address, visible=args.visible, proxy=args.proxy, debug=args.debug)
+    matches = skip_trace(
+        args.address,
+        visible=args.visible,
+        proxy=args.proxy,
+        include_fastpeoplesearch=args.fast,
+        wait=args.wait,
+        debug=args.debug,
+    )
+
+    if args.save:
+        Path("results.json").write_text(json.dumps(matches, indent=2))
+
     if matches:
         print(json.dumps(matches, indent=2))
     else:
