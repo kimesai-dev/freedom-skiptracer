@@ -26,6 +26,7 @@ Optional flags:
 - `--save` – Write results to `results.json`
 - `--wait SECONDS` – Extra delay after navigation to appear more human
 
+
 Use `--debug` to print verbose logs and save the last HTML response when a request fails or is blocked.
 
 ## Output Format

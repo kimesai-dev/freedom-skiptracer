@@ -16,14 +16,12 @@ except ImportError as exc:
 
 PHONE_RE = re.compile(r"\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}")
 
-# Common desktop user agents
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:118.0) Gecko/20100101 Firefox/118.0",
 ]
 
-# Common viewport sizes
 VIEWPORTS = [
     {"width": 1920, "height": 1080},
     {"width": 1366, "height": 768},
@@ -31,7 +29,6 @@ VIEWPORTS = [
     {"width": 1440, "height": 900},
 ]
 
-# HTTP header variations
 ACCEPTS = [
     "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
     "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -62,7 +59,6 @@ def save_debug_html(html: str) -> None:
 
 
 def apply_stealth(page) -> None:
-    """Inject randomized stealth scripts into the page."""
     vendor = random.choice(["Google Inc.", "Apple Computer, Inc.", "Microsoft Corporation"])
     languages = random.choice([
         ["en-US", "en"],
@@ -95,16 +91,10 @@ def fetch_html(context, url: str, debug: bool, wait: float) -> str:
 
 
 def is_bot_trap(html: str) -> bool:
-    """Return True if the HTML looks like a bot trap page."""
     return BOT_TRAP_TEXT in html
 
 
-def search_truepeoplesearch(
-    context,
-    address: str,
-    wait: float,
-    debug: bool,
-) -> List[Dict[str, object]]:
+def search_truepeoplesearch(context, address: str, wait: float, debug: bool) -> List[Dict[str, object]]:
     if debug:
         print("Trying TruePeopleSearch...")
 
@@ -119,6 +109,7 @@ def search_truepeoplesearch(
             if debug:
                 print("Still blocked by bot trap on TruePeopleSearch.")
             return []
+
     soup = BeautifulSoup(html, "html.parser")
     cards = soup.select("div.card")
     if debug:
@@ -143,12 +134,7 @@ def search_truepeoplesearch(
     return results
 
 
-def search_fastpeoplesearch(
-    context,
-    address: str,
-    wait: float,
-    debug: bool,
-) -> List[Dict[str, object]]:
+def search_fastpeoplesearch(context, address: str, wait: float, debug: bool) -> List[Dict[str, object]]:
     if debug:
         print("Trying FastPeopleSearch...")
 
@@ -179,14 +165,7 @@ def search_fastpeoplesearch(
     return results
 
 
-def skip_trace(
-    address: str,
-    visible: bool = False,
-    proxy: str | None = None,
-    include_fastpeoplesearch: bool = False,
-    wait: float = 0.0,
-    debug: bool = False,
-) -> List[Dict[str, object]]:
+def skip_trace(address: str, visible: bool = False, proxy: str | None = None, include_fastpeoplesearch: bool = False, wait: float = 0.0, debug: bool = False) -> List[Dict[str, object]]:
     ua = random.choice(USER_AGENTS)
     viewport = random.choice(VIEWPORTS)
     headers = {
@@ -218,7 +197,7 @@ def skip_trace(
             try:
                 fps_results = search_fastpeoplesearch(context, address, wait, debug)
                 results.extend(fps_results)
-            except Exception as exc:  # pragma: no cover - network call
+            except Exception as exc:
                 if debug:
                     print(f"FastPeopleSearch failed: {exc}")
         browser.close()
@@ -231,22 +210,9 @@ def main() -> None:
     parser.add_argument("--debug", action="store_true", help="Save last HTML response")
     parser.add_argument("--visible", action="store_true", help="Run browser visibly")
     parser.add_argument("--proxy", help="Proxy server e.g. http://user:pass@host:port")
-    parser.add_argument(
-        "--fast",
-        action="store_true",
-        help="Include FastPeopleSearch (may trigger bot checks)",
-    )
-    parser.add_argument(
-        "--save",
-        action="store_true",
-        help="Write results to results.json",
-    )
-    parser.add_argument(
-        "--wait",
-        type=float,
-        default=0.0,
-        help="Additional wait time after navigation",
-    )
+    parser.add_argument("--fast", action="store_true", help="Include FastPeopleSearch (may trigger bot checks)")
+    parser.add_argument("--save", action="store_true", help="Write results to results.json")
+    parser.add_argument("--wait", type=float, default=0.0, help="Additional wait time after navigation")
     args = parser.parse_args()
 
     matches = skip_trace(
