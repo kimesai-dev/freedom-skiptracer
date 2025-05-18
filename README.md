@@ -1,6 +1,8 @@
 # freedom-skiptracer
 
-This project provides a simple skip tracing utility that searches free public data sources for phone numbers associated with a property address. It uses Playwright with a headless Chromium browser to better mimic real browsers and avoid simple anti-bot protections. TruePeopleSearch is accessed by filling out the on-page form just like a user.
+This project provides a simple skip tracing utility that searches free public data sources for phone numbers associated with a property address. It uses Playwright with a headless Chromium browser to better mimic real browsers and avoid simple anti-bot protections.
+
+
 ## Installation
 
 Install the dependencies with pip:
@@ -27,7 +29,6 @@ Optional flags:
 Use `--debug` to print verbose logs and save the last HTML response when a request fails or is blocked.
 
 ## Output Format
-
 
 The script looks up matches on TruePeopleSearch and optionally FastPeopleSearch and outputs a list of potential matches in the form:
 
