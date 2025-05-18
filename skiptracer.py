@@ -1,17 +1,6 @@
 import re
 from typing import List, Dict
 
-try:
-    import requests
-except ModuleNotFoundError:
-    print("Missing dependency: install with pip install requests")
-    raise SystemExit(1)
-
-try:
-    from bs4 import BeautifulSoup
-except ModuleNotFoundError:
-    print("Missing dependency: install with pip install beautifulsoup4")
-    raise SystemExit(1)
 
 from urllib.parse import quote_plus
 
