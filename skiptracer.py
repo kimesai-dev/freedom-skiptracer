@@ -50,12 +50,60 @@ def apply_stealth(page) -> None:
         """
     )
 
+def random_mouse_movement(page, width: int = 1366, height: int = 768) -> None:
+    """Move the mouse around randomly to appear less like a bot."""
+    for _ in range(random.randint(5, 10)):
+        x = random.randint(0, width)
+        y = random.randint(0, height)
+        page.mouse.move(x, y, steps=random.randint(5, 15))
+        time.sleep(random.uniform(0.05, 0.2))
+
+def handle_press_and_hold(page, debug: bool) -> bool:
+    """Attempt to solve the 'Press & Hold' challenge automatically."""
+    try:
+        button = page.locator("text=Press & Hold").first
+        button.wait_for(timeout=7000)
+        box = button.bounding_box()
+        if box:
+            page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2, steps=15)
+        page.mouse.down()
+        time.sleep(random.uniform(5.5, 7.5))
+        page.mouse.up()
+        page.wait_for_load_state("networkidle", timeout=15000)
+        if debug:
+            Path("logs").mkdir(exist_ok=True)
+            Path("logs/after_press_hold.html").write_text(page.content())
+        return True
+    except Exception as e:
+        if debug:
+            print(f"Failed to complete press-and-hold: {e}")
+        return False
+
+def fetch_html(context, url: str, debug: bool) -> str:
+    """Navigate to a URL in a fresh page and return the HTML."""
+    page = context.new_page()
+    apply_stealth(page)
+    random_mouse_movement(page)
+    response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    for _ in range(random.randint(1, 2)):
+        page.mouse.wheel(0, random.randint(200, 800))
+        time.sleep(random.uniform(0.2, 0.5))
+    time.sleep(random.uniform(0.3, 0.7))
+    html = page.content()
+    if debug:
+        save_debug_html(html)
+    if response and response.status >= 400:
+        raise ValueError(f"HTTP {response.status}")
+    page.close()
+    return html
+
 def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -> List[Dict[str, object]]:
     if debug:
         print("Trying TruePeopleSearch...")
 
     page = context.new_page()
     apply_stealth(page)
+    random_mouse_movement(page)
     page.goto("https://www.truepeoplesearch.com/", wait_until="domcontentloaded", timeout=30000)
 
     try:
@@ -88,10 +136,53 @@ def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -
             page.close()
             return []
 
+    time.sleep(3)
     page.wait_for_load_state("domcontentloaded")
+    for _ in range(random.randint(1, 3)):
+        page.mouse.wheel(0, random.randint(200, 800))
+        time.sleep(random.uniform(0.3, 0.8))
+    random_mouse_movement(page)
     html = page.content()
     if debug:
-        save_debug_html(html)
+        Path("logs").mkdir(exist_ok=True)
+        Path("logs/page_after_submit.html").write_text(html)
+
+    lower_html = html.lower()
+    bot_check = False
+    if (
+        "are you a human" in lower_html
+        or "robot check" in lower_html
+        or "press & hold" in lower_html
+        or ("verify" in lower_html and "robot" in lower_html)
+    ):
+        bot_check = True
+    else:
+        try:
+            if page.locator("text=verify", has_text="robot").first.is_visible(timeout=1000):
+                bot_check = True
+        except Exception:
+            pass
+
+    if "press & hold" in lower_html and "confirm you are a human" in lower_html:
+        print("Press & Hold challenge detected — attempting to solve")
+        solved = handle_press_and_hold(page, debug)
+        html = page.content()
+        lower_html = html.lower()
+        if solved:
+            bot_check = False
+
+    if bot_check:
+        print("Bot check detected — waiting 10s and retrying...")
+        if debug:
+            Path("logs/page_after_submit.html").write_text(html)
+        page.pause()
+        time.sleep(10)
+        page.reload()
+        page.wait_for_load_state("domcontentloaded")
+        random_mouse_movement(page)
+        html = page.content()
+        if debug:
+            save_debug_html(html)
 
     soup = BeautifulSoup(html, "html.parser")
     cards = soup.select("div.card a[href*='/details']")
