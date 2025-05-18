@@ -1,18 +1,20 @@
 import re
-from typing import List, Dict
 import sys
+import json
+import time
+import os
+import random
+from pathlib import Path
+from typing import List, Dict
+from urllib.parse import quote_plus
 
 try:
     import requests
     from bs4 import BeautifulSoup
-except ModuleNotFoundError as exc:
-    missing = exc.name
+except ImportError as e:
+    missing = str(e).split("'")[1]
     print(f"Missing dependency: install with 'pip install {missing}'")
     sys.exit(1)
-from urllib.parse import quote_plus
-import random
-import time
-import os
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -27,13 +29,14 @@ DEFAULT_HEADERS = {
     "Connection": "keep-alive",
 }
 
+LOG_DIR = Path("logs")
+PHONE_RE = re.compile(r"\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}")
+
 
 def _make_headers() -> dict:
     headers = DEFAULT_HEADERS.copy()
     headers["User-Agent"] = random.choice(USER_AGENTS)
     return headers
-
-PHONE_RE = re.compile(r"\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}")
 
 
 def _normalize_phone(number: str) -> str:
@@ -59,7 +62,7 @@ def _fetch(url: str, debug: bool = False, retries: int = 3) -> requests.Response
         if resp.status_code != 403:
             break
         if attempt < retries:
-            print("Blocked \u2014 retrying with new headers")
+            print("Blocked — retrying with new headers")
             time.sleep(random.uniform(0.5, 1.5))
     if debug:
         os.makedirs("logs", exist_ok=True)
@@ -71,7 +74,9 @@ def _fetch(url: str, debug: bool = False, retries: int = 3) -> requests.Response
 
 def search_truepeoplesearch(address: str, debug: bool = False) -> List[Dict[str, object]]:
     """Searches TruePeopleSearch for the given address."""
-    print("Trying TruePeopleSearch...")
+    if debug:
+        print("Trying TruePeopleSearch...")
+
     url = (
         "https://www.truepeoplesearch.com/results?" +
         f"streetaddress={quote_plus(address)}"
@@ -81,7 +86,9 @@ def search_truepeoplesearch(address: str, debug: bool = False) -> List[Dict[str,
     cards = soup.select("div.card")
     if not cards:
         cards = soup.select("li.card")
-    print(f"Found {len(cards)} cards...")
+    if debug:
+        print(f"Found {len(cards)} cards...")
+
     results = []
     for card in cards:
         name_el = card.find("a", href=re.compile("/details"))
@@ -92,7 +99,8 @@ def search_truepeoplesearch(address: str, debug: bool = False) -> List[Dict[str,
         location = location_el.get_text(strip=True) if location_el else ""
         phone_text = card.get_text(" ")
         phones = _parse_phones(phone_text)
-        print("Parsing result...")
+        if debug:
+            print("Parsing result...")
         if name or phones:
             results.append({
                 "name": name,
@@ -105,7 +113,9 @@ def search_truepeoplesearch(address: str, debug: bool = False) -> List[Dict[str,
 
 def search_fastpeoplesearch(address: str, debug: bool = False) -> List[Dict[str, object]]:
     """Searches FastPeopleSearch for the given address."""
-    print("Trying FastPeopleSearch...")
+    if debug:
+        print("Trying FastPeopleSearch...")
+
     slug = quote_plus(address.lower().replace(",", "").replace(" ", "-"))
     url = f"https://www.fastpeoplesearch.com/address/{slug}"
     resp = _fetch(url, debug)
@@ -113,7 +123,9 @@ def search_fastpeoplesearch(address: str, debug: bool = False) -> List[Dict[str,
     cards = soup.select("div.card")
     if not cards:
         cards = soup.select("li.card")
-    print(f"Found {len(cards)} cards...")
+    if debug:
+        print(f"Found {len(cards)} cards...")
+
     results = []
     for card in cards:
         name_el = card.find("a", href=re.compile("/person"))
@@ -124,7 +136,8 @@ def search_fastpeoplesearch(address: str, debug: bool = False) -> List[Dict[str,
         location = location_el.get_text(strip=True) if location_el else ""
         phone_text = card.get_text(" ")
         phones = _parse_phones(phone_text)
-        print("Parsing result...")
+        if debug:
+            print("Parsing result...")
         if name or phones:
             results.append({
                 "name": name,
@@ -170,4 +183,4 @@ if __name__ == "__main__":
         print("No matches found for this address.")
     else:
         for match in matches:
-            print(match)
+            print(json.dumps(match, ensure_ascii=False))

@@ -5,26 +5,17 @@ sources for phone numbers associated with a property address.
 
 ## Usage
 
-```
+```bash
 python skiptracer.py "709 W High St, Portland, IN"
-```
+Use --debug to save the raw HTML of the last request to logs/debug_last.html:
 
-Use `--debug` to save the raw HTML of the last request to `logs/debug_last.html`:
-
-```
 python skiptracer.py "709 W High St, Portland, IN" --debug
-```
-
 Install dependencies with:
 
-```
 pip install -r requirements.txt
-```
+The script will attempt to look up matches on TruePeopleSearch.com and
+FastPeopleSearch.com and output a list of potential matches in the form:
 
-The script will attempt to look up matches on **TruePeopleSearch.com** and
-**FastPeopleSearch.com** and output a list of potential matches in the form:
-
-```
 [
   {
     "name": "John D Smith",
@@ -34,6 +25,17 @@ The script will attempt to look up matches on **TruePeopleSearch.com** and
   },
   ...
 ]
-```
-
 Only publicly available information is queried and returned.
+
+
+---
+
+### ✅ Next Steps:
+1. Replace your current `README.md` content with the version above
+2. Save the file
+3. Then commit and push:
+
+```bash
+git add README.md
+git commit -m "Resolve README.md conflicts and finalize usage section"
+git push origin main
