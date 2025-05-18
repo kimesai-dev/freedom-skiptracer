@@ -2,7 +2,6 @@ import argparse
 import json
 import random
 import re
-<<<<<< codex/build-skip-tracing-module-for-public-data-16yzpq
 import time
 import os
 from pathlib import Path
@@ -73,7 +72,6 @@ def fetch_html(context, url: str, debug: bool) -> str:
 
 
 def search_truepeoplesearch(context, address: str, debug: bool) -> List[Dict[str, object]]:
-<<<<<< codex/build-skip-tracing-module-for-public-data-16yzpq
     if debug:
         print("Trying TruePeopleSearch...")
 
@@ -81,7 +79,6 @@ def search_truepeoplesearch(context, address: str, debug: bool) -> List[Dict[str
     html = fetch_html(context, url, debug)
     soup = BeautifulSoup(html, "html.parser")
     cards = soup.select("div.card")
-<<<<<< codex/build-skip-tracing-module-for-public-data-16yzpq
     if debug:
         print(f"Found {len(cards)} cards on TruePeopleSearch")
 
@@ -105,15 +102,14 @@ def search_truepeoplesearch(context, address: str, debug: bool) -> List[Dict[str
 
 
 def search_fastpeoplesearch(context, address: str, debug: bool) -> List[Dict[str, object]]:
-<<<<<< codex/build-skip-tracing-module-for-public-data-16yzpq
     if debug:
         print("Trying FastPeopleSearch...")
+
     slug = address.lower().replace(",", "").replace(" ", "-")
     url = f"https://www.fastpeoplesearch.com/address/{slug}"
     html = fetch_html(context, url, debug)
     soup = BeautifulSoup(html, "html.parser")
     cards = soup.select("div.card")
-<<<<<<codex/build-skip-tracing-module-for-public-data-16yzpq
     if debug:
         print(f"Found {len(cards)} cards on FastPeopleSearch")
 
