@@ -3,10 +3,8 @@ import json
 import random
 import re
 import time
-import os
 from pathlib import Path
 from typing import Dict, List
-from urllib.parse import quote_plus
 
 try:
     from bs4 import BeautifulSoup
@@ -18,15 +16,27 @@ except ImportError as exc:
 
 PHONE_RE = re.compile(r"\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}")
 
-# Common desktop user agents
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:118.0) Gecko/20100101 Firefox/118.0",
 ]
-BOT_TRAP_TEXT = "Server Error in '/' Application."
-VIEWPORTS = [{"width": 1366, "height": 768}, {"width": 1920, "height": 1080}, {"width": 1600, "height": 900}]
 
+VIEWPORTS = [
+    {"width": 1920, "height": 1080},
+    {"width": 1366, "height": 768},
+    {"width": 1536, "height": 864},
+    {"width": 1440, "height": 900},
+]
+
+ACCEPTS = [
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+]
+ACCEPT_LANGS = ["en-US,en;q=0.9", "en-US,en;q=0.8,fr;q=0.6", "en-US,en;q=0.7"]
+REFERERS = ["https://www.google.com/", "https://duckduckgo.com/"]
+
+BOT_TRAP_TEXT = "Server Error in '/' Application."
 
 
 def _normalize_phone(number: str) -> str:
@@ -49,8 +59,6 @@ def save_debug_html(html: str) -> None:
 
 
 def apply_stealth(page) -> None:
-    """Inject basic stealth scripts into the page."""
-
     plugin_count = random.randint(3, 5)
     hardware = random.choice([2, 4, 8])
     touch = random.choice([0, 1])
@@ -58,12 +66,13 @@ def apply_stealth(page) -> None:
         f"""
         Object.defineProperty(navigator, 'webdriver', {{ get: () => undefined }});
         window.chrome = window.chrome || {{ runtime: {{}} }};
-        Object.defineProperty(navigator, 'plugins', {{ get: () => new Array({{plugin_count}}).fill(1) }});
+        Object.defineProperty(navigator, 'plugins', {{ get: () => new Array({plugin_count}).fill(1) }});
         Object.defineProperty(navigator, 'languages', {{ get: () => ['en-US', 'en'] }});
-        Object.defineProperty(navigator, 'hardwareConcurrency', {{ get: () => {{hardware}} }});
-        Object.defineProperty(navigator, 'maxTouchPoints', {{ get: () => {{touch}} }});
+        Object.defineProperty(navigator, 'hardwareConcurrency', {{ get: () => {hardware} }});
+        Object.defineProperty(navigator, 'maxTouchPoints', {{ get: () => {touch} }});
         """
     )
+
 
 def fetch_html(context, url: str, debug: bool, wait: float = 0.0) -> str:
     page = context.new_page()
@@ -81,6 +90,7 @@ def fetch_html(context, url: str, debug: bool, wait: float = 0.0) -> str:
     page.close()
     return html
 
+
 def search_truepeoplesearch(context, address: str, wait: float, debug: bool) -> List[Dict[str, object]]:
     if debug:
         print("Trying TruePeopleSearch...")
@@ -94,6 +104,8 @@ def search_truepeoplesearch(context, address: str, wait: float, debug: bool) -> 
         html = fetch_html(context, url, debug, wait)
         if BOT_TRAP_TEXT in html and debug:
             print("Bot trap page persisted after retry.")
+            return []
+
     soup = BeautifulSoup(html, "html.parser")
     cards = soup.select("div.card")
     if debug:
@@ -115,6 +127,9 @@ def search_truepeoplesearch(context, address: str, wait: float, debug: bool) -> 
                 "city_state": location,
                 "source": "TruePeopleSearch",
             })
+    return results
+
+
 def search_fastpeoplesearch(context, address: str, wait: float, debug: bool) -> List[Dict[str, object]]:
     if debug:
         print("Trying FastPeopleSearch...")
@@ -144,20 +159,23 @@ def search_fastpeoplesearch(context, address: str, wait: float, debug: bool) -> 
                 "source": "FastPeopleSearch",
             })
     return results
-def skip_trace(
-    address: str,
-    visible: bool = False,
-    proxy: str | None = None,
-    include_fastpeoplesearch: bool = False,
-    wait: float = 0.0,
-    debug: bool = False,
-) -> List[Dict[str, object]]:
+
+
+def skip_trace(address: str, visible: bool = False, proxy: str | None = None, include_fastpeoplesearch: bool = False, wait: float = 0.0, debug: bool = False) -> List[Dict[str, object]]:
     ua = random.choice(USER_AGENTS)
     viewport = random.choice(VIEWPORTS)
+
+    def pick_proxy(value: str | None) -> str | None:
+        if not value:
+            return None
+        choices = [p.strip() for p in value.split(",") if p.strip()]
+        return random.choice(choices) if choices else None
+
     with sync_playwright() as p:
         launch_args = {"headless": not visible}
-        if proxy:
-            launch_args["proxy"] = {"server": proxy}
+        selected_proxy = pick_proxy(proxy)
+        if selected_proxy:
+            launch_args["proxy"] = {"server": selected_proxy}
         browser = p.chromium.launch(**launch_args)
         context = browser.new_context(user_agent=ua, viewport=viewport)
         results = search_truepeoplesearch(context, address, wait, debug)
@@ -166,11 +184,12 @@ def skip_trace(
             try:
                 fps_results = search_fastpeoplesearch(context, address, wait, debug)
                 results.extend(fps_results)
-            except Exception as exc:  # pragma: no cover - network call
+            except Exception as exc:
                 if debug:
                     print(f"FastPeopleSearch failed: {exc}")
         browser.close()
     return results
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Free skip tracing")
