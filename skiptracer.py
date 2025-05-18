@@ -72,25 +72,70 @@ def fetch_html(context, url: str, debug: bool) -> str:
 
 
 def search_truepeoplesearch(context, address: str, debug: bool) -> List[Dict[str, object]]:
+    """Search TruePeopleSearch using the on-page form."""
     if debug:
         print("Trying TruePeopleSearch...")
 
-    url = "https://www.truepeoplesearch.com/results?streetaddress=" + address.replace(" ", "+")
-    html = fetch_html(context, url, debug)
+    page = context.new_page()
+    apply_stealth(page)
+
+    # Open the home page and switch to the address search tab
+    page.goto("https://www.truepeoplesearch.com/", wait_until="domcontentloaded", timeout=30000)
+    try:
+        page.click("text=Address", timeout=5000)
+    except Exception:
+        pass
+
+    # Fill the form field with the address text
+    try:
+        input_selector = "input[type='text']"
+        page.fill(input_selector, address)
+    except Exception:
+        if debug:
+            print("Failed to locate address input field")
+        page.close()
+        return []
+
+    # Submit the search
+    try:
+        page.press(input_selector, "Enter")
+    except Exception:
+        try:
+            page.click("button[type='submit']")
+        except Exception:
+            if debug:
+                print("Failed to submit address search")
+            page.close()
+            return []
+
+    page.wait_for_load_state("domcontentloaded")
+
+    html = page.content()
+    if debug:
+        save_debug_html(html)
+
     soup = BeautifulSoup(html, "html.parser")
-    cards = soup.select("div.card")
+    cards = soup.select("div.card a[href*='/details']")
     if debug:
         print(f"Found {len(cards)} cards on TruePeopleSearch")
 
     results = []
-    for card in cards:
-        name_el = card.find("a", href=re.compile("/details"))
-        if not name_el:
+    for link in cards:
+        href = link.get("href")
+        if not href:
             continue
-        name = name_el.get_text(strip=True)
-        loc_el = card.find("div", class_=re.compile("address"))
-        location = loc_el.get_text(strip=True) if loc_el else ""
-        phones = _parse_phones(card.get_text(" "))
+        detail_url = href if href.startswith("http") else f"https://www.truepeoplesearch.com{href}"
+        detail_html = fetch_html(context, detail_url, debug)
+        detail_soup = BeautifulSoup(detail_html, "html.parser")
+        name_el = detail_soup.find(["h1", "h2", "strong"])
+        name = name_el.get_text(strip=True) if name_el else ""
+        loc_el = detail_soup.find(string=re.compile("Current Address", re.I))
+        if loc_el and loc_el.find_parent("div"):
+            location_div = loc_el.find_parent("div").find_next_sibling("div")
+            location = location_div.get_text(strip=True) if location_div else ""
+        else:
+            location = ""
+        phones = _parse_phones(detail_soup.get_text(" "))
         if name or phones:
             results.append({
                 "name": name,
@@ -98,6 +143,7 @@ def search_truepeoplesearch(context, address: str, debug: bool) -> List[Dict[str
                 "city_state": location,
                 "source": "TruePeopleSearch",
             })
+    page.close()
     return results
 
 
@@ -132,17 +178,31 @@ def search_fastpeoplesearch(context, address: str, debug: bool) -> List[Dict[str
     return results
 
 
-def skip_trace(address: str, visible: bool = False, proxy: str | None = None, debug: bool = False) -> List[Dict[str, object]]:
+def skip_trace(
+    address: str,
+    visible: bool = False,
+    proxy: str | None = None,
+    include_fastpeoplesearch: bool = False,
+    debug: bool = False,
+) -> List[Dict[str, object]]:
     ua = random.choice(USER_AGENTS)
     with sync_playwright() as p:
         launch_args = {"headless": not visible}
         if proxy:
             launch_args["proxy"] = {"server": proxy}
         browser = p.chromium.launch(**launch_args)
-        context = browser.new_context(user_agent=ua, viewport={"width": 1366, "height": 768})
+        context = browser.new_context(
+            user_agent=ua, viewport={"width": 1366, "height": 768}
+        )
         results = search_truepeoplesearch(context, address, debug)
-        if not results:
-            results = search_fastpeoplesearch(context, address, debug)
+
+        if include_fastpeoplesearch:
+            try:
+                fps_results = search_fastpeoplesearch(context, address, debug)
+                results.extend(fps_results)
+            except Exception as exc:  # pragma: no cover - network call
+                if debug:
+                    print(f"FastPeopleSearch failed: {exc}")
         browser.close()
     return results
 
@@ -153,9 +213,29 @@ def main() -> None:
     parser.add_argument("--debug", action="store_true", help="Save last HTML response")
     parser.add_argument("--visible", action="store_true", help="Run browser visibly")
     parser.add_argument("--proxy", help="Proxy server e.g. http://user:pass@host:port")
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="Include FastPeopleSearch (may trigger bot checks)",
+    )
+    parser.add_argument(
+        "--save",
+        action="store_true",
+        help="Write results to results.json",
+    )
     args = parser.parse_args()
 
-    matches = skip_trace(args.address, visible=args.visible, proxy=args.proxy, debug=args.debug)
+    matches = skip_trace(
+        args.address,
+        visible=args.visible,
+        proxy=args.proxy,
+        include_fastpeoplesearch=args.fast,
+        debug=args.debug,
+    )
+
+    if args.save:
+        Path("results.json").write_text(json.dumps(matches, indent=2))
+
     if matches:
         print(json.dumps(matches, indent=2))
     else:
