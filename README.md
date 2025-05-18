@@ -12,6 +12,7 @@ pip install -r requirements.txt
 
 ## Usage
 
+
 ```bash
 python skiptracer.py "709 W High St, Portland, IN"
 ```
@@ -29,6 +30,7 @@ Use `--debug` to print verbose logs and save the last HTML response when a reque
 ## Output Format
 
 The script looks up matches on TruePeopleSearch and optionally FastPeopleSearch and outputs a list of potential matches in the form:
+
 
 ```
 [
