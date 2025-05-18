@@ -41,14 +41,19 @@ def save_debug_html(html: str, name: str = "debug_last.html") -> None:
     Path(f"logs/{name}").write_text(html)
 
 def apply_stealth(page) -> None:
+    hw_concurrency = random.randint(4, 8)
+    dev_mem = random.choice([4, 8])
     page.add_init_script(
-        """
-        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-        window.chrome = window.chrome || { runtime: {} };
-        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
-        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+        f"""
+        Object.defineProperty(navigator, 'webdriver', {{get: () => undefined}});
+        window.chrome = window.chrome || {{ runtime: {{}} }};
+        Object.defineProperty(navigator, 'plugins', {{ get: () => [1, 2, 3, 4] }});
+        Object.defineProperty(navigator, 'languages', {{ get: () => ['en-US', 'en'] }});
+        Object.defineProperty(navigator, 'hardwareConcurrency', {{ get: () => {hw_concurrency} }});
+        Object.defineProperty(navigator, 'deviceMemory', {{ get: () => {dev_mem} }});
         """
     )
+
 
 def random_mouse_movement(page, width: int = 1366, height: int = 768) -> None:
     for _ in range(random.randint(5, 10)):
@@ -84,6 +89,7 @@ def fetch_html(context, url: str, debug: bool) -> str:
     for _ in range(random.randint(1, 2)):
         page.mouse.wheel(0, random.randint(200, 800))
         time.sleep(random.uniform(0.2, 0.5))
+ 
     time.sleep(random.uniform(0.3, 0.7))
     html = page.content()
     if debug:
@@ -93,7 +99,59 @@ def fetch_html(context, url: str, debug: bool) -> str:
     page.close()
     return html
 
-def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -> List[Dict[str, object]]:
+
+def random_mouse_movement(page, times: int | None = None) -> None:
+    """Move the mouse around randomly to appear more human."""
+    times = times or random.randint(3, 7)
+    box = page.viewport_size or {"width": 1366, "height": 768}
+    for _ in range(times):
+        x = random.randint(0, box["width"] - 1)
+        y = random.randint(0, box["height"] - 1)
+        page.mouse.move(x, y, steps=random.randint(5, 20))
+        page.wait_for_timeout(random.randint(50, 150))
+
+
+def handle_press_and_hold(page, debug: bool) -> None:
+    """Attempt to solve press and hold challenge."""
+    try:
+        btn = page.locator("text=Press & Hold").first
+        btn.wait_for(timeout=3000)
+        box = btn.bounding_box()
+        if box:
+            page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+            page.mouse.down()
+            page.wait_for_timeout(random.randint(8000, 12000))
+            page.mouse.up()
+    except Exception as exc:
+        if debug:
+            print(f"Failed to handle press-and-hold: {exc}")
+
+
+def create_context(p, visible: bool, proxy: str | None) -> tuple:
+    """Launch browser and create a randomized context."""
+    launch_args = {"headless": not visible}
+    if proxy:
+        launch_args["proxy"] = {"server": proxy}
+    browser = p.chromium.launch(**launch_args)
+    width = random.randint(1280, 1920)
+    height = random.randint(720, 1080)
+    context = browser.new_context(
+        user_agent=random.choice(USER_AGENTS),
+        viewport={"width": width, "height": height},
+        locale="en-US",
+        timezone_id="America/New_York",
+    )
+    return browser, context
+
+def search_truepeoplesearch(
+    context,
+    address: str,
+    debug: bool,
+    inspect: bool,
+    visible: bool,
+    manual: bool,
+) -> List[Dict[str, object]]:
+
     if debug:
         print("Trying TruePeopleSearch...")
 
@@ -101,6 +159,7 @@ def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -
     apply_stealth(page)
     random_mouse_movement(page)
     page.goto("https://www.truepeoplesearch.com/", wait_until="domcontentloaded", timeout=30000)
+    random_mouse_movement(page)
 
     try:
         page.click("a[href*='Address']", timeout=5000)
@@ -111,7 +170,10 @@ def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -
     try:
         address_input = page.locator("input[placeholder*='Enter name']").first
         address_input.wait_for(timeout=5000)
-        address_input.type(address, delay=random.randint(50, 100))
+        for ch in address:
+            address_input.type(ch, delay=random.randint(50, 120))
+        random_mouse_movement(page, 2)
+
     except Exception:
         if debug:
             print("Failed to locate or type into address input field")
@@ -132,6 +194,8 @@ def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -
                 print("Failed to submit address search")
             page.close()
             return []
+    page.wait_for_load_state("domcontentloaded")
+    time.sleep(3)
 
     time.sleep(3)
     page.wait_for_load_state("domcontentloaded")
@@ -142,13 +206,25 @@ def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -
 
     html = page.content()
     if debug:
-        save_debug_html(html, name="page_after_submit.html")
+        Path("logs").mkdir(exist_ok=True)
+        Path("logs/page_after_submit.html").write_text(html)
 
     lower_html = html.lower()
+    if "press & hold" in lower_html:
+        print("Press & Hold challenge detected")
+        if manual and visible:
+            page.pause()
+        else:
+            handle_press_and_hold(page, debug)
+            page.wait_for_load_state("domcontentloaded")
+            html = page.content()
+            lower_html = html.lower()
+
     bot_check = False
     if (
         "are you a human" in lower_html
         or "robot check" in lower_html
+
         or "press & hold" in lower_html
         or ("verify" in lower_html and "robot" in lower_html)
     ):
@@ -159,6 +235,7 @@ def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -
                 bot_check = True
         except Exception:
             pass
+
 
     if "press & hold" in lower_html and "confirm you are a human" in lower_html:
         print("Press & Hold challenge detected — attempting to solve")
@@ -223,6 +300,7 @@ def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -
     page.close()
     return results
 
+
 def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -> List[Dict[str, object]]:
     if debug:
         print("Trying FastPeopleSearch...")
@@ -283,6 +361,7 @@ def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -
                 "source": "FastPeopleSearch",
             })
     page.close()
+
     return results
 
 def main() -> None:
@@ -291,13 +370,26 @@ def main() -> None:
     parser.add_argument("--debug", action="store_true", help="Save HTML and log status codes")
     parser.add_argument("--visible", action="store_true", help="Show browser during scrape")
     parser.add_argument("--inspect", action="store_true", help="Print raw HTML card text")
+    parser.add_argument("--proxy", help="Proxy server e.g. http://user:pass@host:port")
     parser.add_argument("--fast", action="store_true", help="Include FastPeopleSearch")
+    parser.add_argument("--manual", action="store_true", help="Pause on bot wall for manual solve")
+
     parser.add_argument("--save", action="store_true", help="Write results to results.json")
     args = parser.parse_args()
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=not args.visible)
-        context = browser.new_context(user_agent=random.choice(USER_AGENTS), viewport={"width": 1366, "height": 768})
+        browser, context = create_context(p, args.visible, args.proxy)
+
+        results = []
+        try:
+            results.extend(
+                search_truepeoplesearch(
+                    context, args.address, args.debug, args.inspect, args.visible, args.manual
+                )
+            )
+        except Exception as exc:
+            if args.debug:
+                print(f"TruePeopleSearch failed: {exc}")
 
         results: List[Dict[str, object]] = []
         try:
@@ -312,6 +404,7 @@ def main() -> None:
             except Exception as e:
                 if args.debug:
                     print(f"FastPeopleSearch failed: {e}")
+
 
         context.close()
         browser.close()
