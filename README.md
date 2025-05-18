@@ -12,6 +12,7 @@ pip install -r requirements.txt
 
 ## Usage
 
+
 ```bash
 python skiptracer.py "709 W High St, Portland, IN"
 ```
