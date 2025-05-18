@@ -1,6 +1,9 @@
 import re
 import sys
 import json
+import time
+import os
+import random
 from pathlib import Path
 from typing import List, Dict
 from urllib.parse import quote_plus
@@ -13,16 +16,27 @@ except ImportError as e:
     print(f"Missing dependency: install with 'pip install {missing}'")
     sys.exit(1)
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (X11; Linux x86_64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/113.0 Safari/537.36"
-    )
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/117.0",
+]
+
+DEFAULT_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
 }
 
 LOG_DIR = Path("logs")
 PHONE_RE = re.compile(r"\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}")
+
+
+def _make_headers() -> dict:
+    headers = DEFAULT_HEADERS.copy()
+    headers["User-Agent"] = random.choice(USER_AGENTS)
+    return headers
 
 
 def _normalize_phone(number: str) -> str:
@@ -40,6 +54,24 @@ def _parse_phones(text: str) -> List[str]:
     return list(phones)
 
 
+def _fetch(url: str, debug: bool = False, retries: int = 3) -> requests.Response:
+    """Fetch a URL with basic 403 retry handling and rotating user-agent."""
+    for attempt in range(1, retries + 1):
+        headers = _make_headers()
+        resp = requests.get(url, headers=headers, timeout=15)
+        if resp.status_code != 403:
+            break
+        if attempt < retries:
+            print("Blocked — retrying with new headers")
+            time.sleep(random.uniform(0.5, 1.5))
+    if debug:
+        os.makedirs("logs", exist_ok=True)
+        with open("logs/debug_last.html", "w", encoding="utf-8") as f:
+            f.write(resp.text)
+    resp.raise_for_status()
+    return resp
+
+
 def search_truepeoplesearch(address: str, debug: bool = False) -> List[Dict[str, object]]:
     """Searches TruePeopleSearch for the given address."""
     if debug:
@@ -49,25 +81,13 @@ def search_truepeoplesearch(address: str, debug: bool = False) -> List[Dict[str,
         "https://www.truepeoplesearch.com/results?" +
         f"streetaddress={quote_plus(address)}"
     )
-
-    try:
-        resp = requests.get(url, headers=HEADERS, timeout=15)
-        resp.raise_for_status()
-    except Exception as e:
-        if debug:
-            print(f"Request failed: {e}")
-        return []
-
+    resp = _fetch(url, debug)
     soup = BeautifulSoup(resp.text, "html.parser")
-    cards = soup.select("div.card, div.result, div.results > div")
-
+    cards = soup.select("div.card")
+    if not cards:
+        cards = soup.select("li.card")
     if debug:
         print(f"Found {len(cards)} cards...")
-        if len(cards) == 0:
-            LOG_DIR.mkdir(exist_ok=True)
-            debug_file = LOG_DIR / "debug_last.html"
-            debug_file.write_text(resp.text)
-            print(f"No cards found. Saved response to {debug_file}")
 
     results = []
     for card in cards:
@@ -98,25 +118,13 @@ def search_fastpeoplesearch(address: str, debug: bool = False) -> List[Dict[str,
 
     slug = quote_plus(address.lower().replace(",", "").replace(" ", "-"))
     url = f"https://www.fastpeoplesearch.com/address/{slug}"
-
-    try:
-        resp = requests.get(url, headers=HEADERS, timeout=15)
-        resp.raise_for_status()
-    except Exception as e:
-        if debug:
-            print(f"Request failed: {e}")
-        return []
-
+    resp = _fetch(url, debug)
     soup = BeautifulSoup(resp.text, "html.parser")
-    cards = soup.select("div.card, div.result, div.results > div")
-
+    cards = soup.select("div.card")
+    if not cards:
+        cards = soup.select("li.card")
     if debug:
         print(f"Found {len(cards)} cards...")
-        if len(cards) == 0:
-            LOG_DIR.mkdir(exist_ok=True)
-            debug_file = LOG_DIR / "debug_last.html"
-            debug_file.write_text(resp.text)
-            print(f"No cards found. Saved response to {debug_file}")
 
     results = []
     for card in cards:
@@ -142,29 +150,37 @@ def search_fastpeoplesearch(address: str, debug: bool = False) -> List[Dict[str,
 
 def skip_trace(address: str, debug: bool = False) -> List[Dict[str, object]]:
     """Returns matches for the given property address."""
-    for func in (search_truepeoplesearch, search_fastpeoplesearch):
-        try:
-            results = func(address, debug=debug)
-            if results:
-                return results
-        except Exception as e:
-            if debug:
-                print(f"{func.__name__} failed: {e}")
+    try:
+        results = search_truepeoplesearch(address, debug)
+        if results:
+            return results
+    except Exception:
+        if debug:
+            print("TruePeopleSearch lookup failed")
+
+    try:
+        results = search_fastpeoplesearch(address, debug)
+        if results:
+            return results
+    except Exception:
+        if debug:
+            print("FastPeopleSearch lookup failed")
+
     return []
 
 
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Free skip tracing for an address")
-    parser.add_argument("address", nargs="+", help="Property address")
-    parser.add_argument("--debug", action="store_true", help="Enable debug output")
+    parser = argparse.ArgumentParser(description="Simple skip tracer")
+    parser.add_argument("address", nargs="+", help="Full property address")
+    parser.add_argument("--debug", action="store_true", help="Save and print debug output")
     args = parser.parse_args()
 
     address_input = " ".join(args.address)
-    matches = skip_trace(address_input, debug=args.debug)
-    if matches:
+    matches = skip_trace(address_input, args.debug)
+    if not matches:
+        print("No matches found for this address.")
+    else:
         for match in matches:
             print(json.dumps(match, ensure_ascii=False))
-    else:
-        print("No matches found for this address.")
