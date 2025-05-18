@@ -50,6 +50,20 @@ def apply_stealth(page) -> None:
         """
     )
 
+def fetch_html(context, url: str, debug: bool) -> str:
+    """Navigate to a URL in a fresh page and return the HTML."""
+    page = context.new_page()
+    apply_stealth(page)
+    response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    time.sleep(random.uniform(0.3, 0.7))
+    html = page.content()
+    if debug:
+        save_debug_html(html)
+    if response and response.status >= 400:
+        raise ValueError(f"HTTP {response.status}")
+    page.close()
+    return html
+
 def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -> List[Dict[str, object]]:
     if debug:
         print("Trying TruePeopleSearch...")
@@ -65,9 +79,20 @@ def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -
             print("Failed to click Address tab")
 
     try:
+        street, cityzip = address.split(",", 1)
+    except ValueError:
+        street, cityzip = address, ""
+
+    try:
         address_input = page.locator("input[placeholder*='Enter name']").first
+        city_input = page.locator("input[placeholder*='City']").first
         address_input.wait_for(timeout=5000)
-        address_input.type(address, delay=75)
+        city_input.wait_for(timeout=5000)
+        address_input.fill(street.strip())
+        if cityzip:
+            city_input.fill(cityzip.strip())
+        else:
+            city_input.fill("")
     except Exception:
         if debug:
             print("Failed to locate or type into address input field")
@@ -78,7 +103,8 @@ def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -
         return []
 
     try:
-        address_input.press("Enter")
+        page.press("input[placeholder*='City']", "Enter")
+        time.sleep(3)
     except Exception:
         try:
             page.click("button[type='submit']")
@@ -91,12 +117,42 @@ def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -
     page.wait_for_load_state("domcontentloaded")
     html = page.content()
     if debug:
-        save_debug_html(html)
+        Path("logs").mkdir(exist_ok=True)
+        Path("logs/page_after_submit.html").write_text(html)
+
+    lower_html = html.lower()
+    bot_check = False
+    if (
+        "are you a human" in lower_html
+        or "robot check" in lower_html
+        or ("verify" in lower_html and "robot" in lower_html)
+    ):
+        bot_check = True
+    else:
+        try:
+            if page.locator("text=verify", has_text="robot").first.is_visible(timeout=1000):
+                bot_check = True
+        except Exception:
+            pass
+
+    if bot_check:
+        print("Bot check detected — waiting 10s and retrying...")
+        if debug:
+            Path("logs/page_after_submit.html").write_text(html)
+        page.pause()
+        time.sleep(10)
+        page.reload()
+        page.wait_for_load_state("domcontentloaded")
+        html = page.content()
+        if debug:
+            save_debug_html(html)
 
     soup = BeautifulSoup(html, "html.parser")
     cards = soup.select("div.card a[href*='/details']")
     if debug:
         print(f"Found {len(cards)} cards on TruePeopleSearch")
+    if len(cards) == 0:
+        print("No cards found — likely bot block or bad selector.")
     if inspect:
         for card in cards:
             print("TPS card:\n", card.get_text(" ", strip=True))
@@ -107,7 +163,12 @@ def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -
         if not href:
             continue
         detail_url = href if href.startswith("http") else f"https://www.truepeoplesearch.com{href}"
-        detail_html = fetch_html(context, detail_url, debug)
+        try:
+            detail_html = fetch_html(context, detail_url, debug)
+        except Exception as e:
+            if debug:
+                print(f"Error loading detail page: {e}")
+            continue
         detail_soup = BeautifulSoup(detail_html, "html.parser")
         name_el = detail_soup.find(["h1", "h2", "strong"])
         name = name_el.get_text(strip=True) if name_el else ""
