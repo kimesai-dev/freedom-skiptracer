@@ -5,7 +5,7 @@ import re
 import time
 import os
 from pathlib import Path
-from typing import Dict, List
+from typing import List, Dict
 from urllib.parse import quote_plus
 
 try:
@@ -132,17 +132,31 @@ def search_fastpeoplesearch(context, address: str, debug: bool) -> List[Dict[str
     return results
 
 
-def skip_trace(address: str, visible: bool = False, proxy: str | None = None, debug: bool = False) -> List[Dict[str, object]]:
+def skip_trace(
+    address: str,
+    visible: bool = False,
+    proxy: str | None = None,
+    include_fastpeoplesearch: bool = False,
+    debug: bool = False,
+) -> List[Dict[str, object]]:
     ua = random.choice(USER_AGENTS)
     with sync_playwright() as p:
         launch_args = {"headless": not visible}
         if proxy:
             launch_args["proxy"] = {"server": proxy}
         browser = p.chromium.launch(**launch_args)
-        context = browser.new_context(user_agent=ua, viewport={"width": 1366, "height": 768})
+        context = browser.new_context(
+            user_agent=ua, viewport={"width": 1366, "height": 768}
+        )
         results = search_truepeoplesearch(context, address, debug)
-        if not results:
-            results = search_fastpeoplesearch(context, address, debug)
+
+        if include_fastpeoplesearch:
+            try:
+                fps_results = search_fastpeoplesearch(context, address, debug)
+                results.extend(fps_results)
+            except Exception as exc:  # pragma: no cover - network call
+                if debug:
+                    print(f"FastPeopleSearch failed: {exc}")
         browser.close()
     return results
 
@@ -153,9 +167,29 @@ def main() -> None:
     parser.add_argument("--debug", action="store_true", help="Save last HTML response")
     parser.add_argument("--visible", action="store_true", help="Run browser visibly")
     parser.add_argument("--proxy", help="Proxy server e.g. http://user:pass@host:port")
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="Include FastPeopleSearch (may trigger bot checks)",
+    )
+    parser.add_argument(
+        "--save",
+        action="store_true",
+        help="Write results to results.json",
+    )
     args = parser.parse_args()
 
-    matches = skip_trace(args.address, visible=args.visible, proxy=args.proxy, debug=args.debug)
+    matches = skip_trace(
+        args.address,
+        visible=args.visible,
+        proxy=args.proxy,
+        include_fastpeoplesearch=args.fast,
+        debug=args.debug,
+    )
+
+    if args.save:
+        Path("results.json").write_text(json.dumps(matches, indent=2))
+
     if matches:
         print(json.dumps(matches, indent=2))
     else:
