@@ -4,6 +4,7 @@ This project provides a simple skip tracing utility that searches free public da
 
 The scraper launches Chromium in a persistent context so cookies and TLS fingerprints survive across runs.
 
+
 ## Installation
 
 Install the dependencies with pip:
@@ -13,6 +14,7 @@ pip install -r requirements.txt
 ```
 
 ## Usage
+
 
 ```bash
 python skiptracer.py "709 W High St, Portland, IN"
@@ -26,6 +28,7 @@ Optional flags:
 - `--fast` – Include FastPeopleSearch (may trigger bot checks)
 - `--save` – Write results to `results.json`
 - `--inspect` – Print raw card data before parsing
+
 
 Use `--debug` to print verbose logs and save the last HTML response when a request fails or is blocked.
 
