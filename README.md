@@ -1,20 +1,31 @@
 # freedom-skiptracer
 
 This project provides a simple skip tracing utility that searches free public data
-sources for phone numbers associated with a property address.
+sources for phone numbers associated with a property address. It uses
+Playwright with a headless Chromium browser to better mimic real browsers and
+avoid simple anti-bot protections.
 
-## Usage
+## Installation
+
+Install the dependencies with pip:
 
 ```bash
-python skiptracer.py "709 W High St, Portland, IN"
-Use --debug to save the raw HTML of the last request to logs/debug_last.html:
-
-python skiptracer.py "709 W High St, Portland, IN" --debug
-Install dependencies with:
-
 pip install -r requirements.txt
-The script will attempt to look up matches on TruePeopleSearch.com and
-FastPeopleSearch.com and output a list of potential matches in the form:
+Usage
+
+python skiptracer.py "709 W High St, Portland, IN"
+Optional flags:
+--debug
+Save the last HTML response to logs/debug_last.html
+--visible
+Launch the browser in non-headless mode
+--proxy URL
+Launch the browser using a proxy (e.g., http://user:pass@host:port)
+Use --debug to print verbose logs and save the last HTML response to logs/debug_last.html when a request fails or is blocked.
+
+Output Format
+
+The script will attempt to look up matches on TruePeopleSearch.com and FastPeopleSearch.com and output a list of potential matches in the form:
 
 [
   {
@@ -22,20 +33,18 @@ FastPeopleSearch.com and output a list of potential matches in the form:
     "phones": ["+1 (260) 555-1234"],
     "city_state": "Portland, IN",
     "source": "TruePeopleSearch"
-  },
-  ...
+  }
 ]
 Only publicly available information is queried and returned.
 
 
 ---
 
-### ✅ Next Steps:
-1. Replace your current `README.md` content with the version above
-2. Save the file
-3. Then commit and push:
+### 🧠 After that:
+
+1. Save the file.
+2. In your terminal (still inside `freedom-skiptracer` folder), run:
 
 ```bash
 git add README.md
-git commit -m "Resolve README.md conflicts and finalize usage section"
-git push origin main
+git commit -m "Resolve merge conflict in README"
