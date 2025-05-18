@@ -65,7 +65,7 @@ def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -
             print("Failed to click Address tab")
 
     try:
-        address_input = page.locator("input[placeholder*='City']").first
+        address_input = page.locator("input[placeholder*='Enter name']").first
         address_input.wait_for(timeout=5000)
         address_input.type(address, delay=75)
     except Exception:
@@ -78,10 +78,10 @@ def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -
         return []
 
     try:
-        page.click("button[type='submit']")
+        address_input.press("Enter")
     except Exception:
         try:
-            page.keyboard.press("Enter")
+            page.click("button[type='submit']")
         except Exception:
             if debug:
                 print("Failed to submit address search")
