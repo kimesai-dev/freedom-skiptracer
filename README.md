@@ -2,6 +2,7 @@
 
 This project provides a simple skip tracing utility that searches free public data sources for phone numbers associated with a property address. It uses Playwright with a headless Chromium browser to better mimic real browsers and avoid simple anti-bot protections.
 
+
 ## Installation
 
 Install the dependencies with pip:
@@ -11,6 +12,7 @@ pip install -r requirements.txt
 ```
 
 ## Usage
+
 
 ```bash
 python skiptracer.py "709 W High St, Portland, IN"
