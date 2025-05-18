@@ -31,7 +31,6 @@ Use `--debug` to print verbose logs and save the last HTML response when a reque
 
 The script looks up matches on TruePeopleSearch and optionally FastPeopleSearch and outputs a list of potential matches in the form:
 
-
 ```
 [
   {
