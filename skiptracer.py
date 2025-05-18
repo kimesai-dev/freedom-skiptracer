@@ -45,33 +45,52 @@ def save_debug_html(html: str) -> None:
     Path("logs/debug_last.html").write_text(html)
 
 
+def simulate_interaction(page) -> None:
+    """Simulate minimal user interaction to lower bot detection."""
+    page.mouse.move(random.randint(100, 500), random.randint(100, 500))
+    page.mouse.wheel(0, random.randint(200, 800))
+    time.sleep(random.uniform(1, 2))
+
+
 def apply_stealth(page) -> None:
-    """Inject basic stealth scripts into the page."""
+    """Inject deep stealth scripts into the page."""
     page.add_init_script(
         """
         Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
         window.chrome = window.chrome || { runtime: {} };
-        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+        Object.defineProperty(navigator, 'plugins', { get: () => new Array(5).fill(0) });
         Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+        Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0 });
+        Object.defineProperty(screen, 'colorDepth', { get: () => 24 });
         """
     )
+
+
+BOT_TRAP_TEXT = "Server Error in '/' Application"
 
 
 def fetch_html(context, url: str, debug: bool) -> str:
     page = context.new_page()
     apply_stealth(page)
     response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
-    time.sleep(random.uniform(0.3, 0.7))
+    simulate_interaction(page)
     html = page.content()
     if debug:
         save_debug_html(html)
-    if response and response.status >= 400:
-        raise ValueError(f"HTTP {response.status}")
+        if response and response.status >= 400:
+            print(f"HTTP {response.status} returned")
+    if response and response.status == 403:
+        page.close()
+        raise ValueError("HTTP 403")
+    if BOT_TRAP_TEXT in html:
+        page.close()
+        raise ValueError("Bot trap detected")
     page.close()
     return html
 
 
-def search_truepeoplesearch(context, address: str, debug: bool) -> List[Dict[str, object]]:
+def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -> List[Dict[str, object]]:
     if debug:
         print("Trying TruePeopleSearch...")
 
@@ -81,6 +100,9 @@ def search_truepeoplesearch(context, address: str, debug: bool) -> List[Dict[str
     cards = soup.select("div.card")
     if debug:
         print(f"Found {len(cards)} cards on TruePeopleSearch")
+    if inspect:
+        for card in cards:
+            print("TPS card:\n", card.get_text(" ", strip=True))
 
     results = []
     for card in cards:
@@ -101,7 +123,7 @@ def search_truepeoplesearch(context, address: str, debug: bool) -> List[Dict[str
     return results
 
 
-def search_fastpeoplesearch(context, address: str, debug: bool) -> List[Dict[str, object]]:
+def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -> List[Dict[str, object]]:
     if debug:
         print("Trying FastPeopleSearch...")
 
@@ -112,6 +134,9 @@ def search_fastpeoplesearch(context, address: str, debug: bool) -> List[Dict[str
     cards = soup.select("div.card")
     if debug:
         print(f"Found {len(cards)} cards on FastPeopleSearch")
+    if inspect:
+        for card in cards:
+            print("FPS card:\n", card.get_text(" ", strip=True))
 
     results = []
     for card in cards:
@@ -132,19 +157,60 @@ def search_fastpeoplesearch(context, address: str, debug: bool) -> List[Dict[str
     return results
 
 
-def skip_trace(address: str, visible: bool = False, proxy: str | None = None, debug: bool = False) -> List[Dict[str, object]]:
+def _run_scrape(
+    address: str,
+    visible: bool,
+    proxy: str | None,
+    include_fastpeoplesearch: bool,
+    debug: bool,
+    inspect: bool,
+) -> List[Dict[str, object]]:
     ua = random.choice(USER_AGENTS)
+    user_data_dir = f"/tmp/persistent-profile-{random.randint(0, 1_000_000)}"
+    os.makedirs(user_data_dir, exist_ok=True)
     with sync_playwright() as p:
         launch_args = {"headless": not visible}
         if proxy:
             launch_args["proxy"] = {"server": proxy}
-        browser = p.chromium.launch(**launch_args)
-        context = browser.new_context(user_agent=ua, viewport={"width": 1366, "height": 768})
-        results = search_truepeoplesearch(context, address, debug)
-        if not results:
-            results = search_fastpeoplesearch(context, address, debug)
-        browser.close()
+        context = p.chromium.launch_persistent_context(
+            user_data_dir,
+            user_agent=ua,
+            viewport={"width": 1366, "height": 768},
+            **launch_args,
+        )
+        results = search_truepeoplesearch(context, address, debug, inspect)
+
+        if include_fastpeoplesearch:
+            try:
+                fps_results = search_fastpeoplesearch(context, address, debug, inspect)
+                results.extend(fps_results)
+            except Exception as exc:  # pragma: no cover - network call
+                if debug:
+                    print(f"FastPeopleSearch failed: {exc}")
+        context.close()
     return results
+
+
+def skip_trace(
+    address: str,
+    visible: bool = False,
+    proxies: List[str] | None = None,
+    include_fastpeoplesearch: bool = False,
+    debug: bool = False,
+    inspect: bool = False,
+) -> List[Dict[str, object]]:
+    proxies = proxies or [None]
+    for proxy in proxies:
+        try:
+            if debug:
+                print(f"Using proxy: {proxy}" if proxy else "Using direct connection")
+            results = _run_scrape(address, visible, proxy, include_fastpeoplesearch, debug, inspect)
+            if results:
+                return results
+        except Exception as exc:  # pragma: no cover - network call
+            if debug:
+                print(f"Attempt with {proxy or 'no proxy'} failed: {exc}")
+    return []
 
 
 def main() -> None:
@@ -152,10 +218,40 @@ def main() -> None:
     parser.add_argument("address", help="Property address")
     parser.add_argument("--debug", action="store_true", help="Save last HTML response")
     parser.add_argument("--visible", action="store_true", help="Run browser visibly")
-    parser.add_argument("--proxy", help="Proxy server e.g. http://user:pass@host:port")
+    parser.add_argument(
+        "--proxy",
+        help="Comma-separated proxy list e.g. http://host1:port,http://host2:port",
+    )
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="Include FastPeopleSearch (may trigger bot checks)",
+    )
+    parser.add_argument(
+        "--save",
+        action="store_true",
+        help="Write results to results.json",
+    )
+    parser.add_argument(
+        "--inspect",
+        action="store_true",
+        help="Print raw card data for debugging",
+    )
     args = parser.parse_args()
 
-    matches = skip_trace(args.address, visible=args.visible, proxy=args.proxy, debug=args.debug)
+    proxy_list = args.proxy.split(",") if args.proxy else None
+    matches = skip_trace(
+        args.address,
+        visible=args.visible,
+        proxies=proxy_list,
+        include_fastpeoplesearch=args.fast,
+        debug=args.debug,
+        inspect=args.inspect,
+    )
+
+    if args.save:
+        Path("results.json").write_text(json.dumps(matches, indent=2))
+
     if matches:
         print(json.dumps(matches, indent=2))
     else:
