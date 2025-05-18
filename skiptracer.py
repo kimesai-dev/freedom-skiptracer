@@ -1,8 +1,7 @@
 import re
 from typing import List, Dict
 
-import requests
-from bs4 import BeautifulSoup
+
 from urllib.parse import quote_plus
 
 HEADERS = {
