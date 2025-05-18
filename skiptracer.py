@@ -3,17 +3,17 @@
 import os
 import random
 import re
+import json
 from typing import List, Dict
+from urllib.parse import quote_plus
 
 try:
     from bs4 import BeautifulSoup
     from playwright.sync_api import sync_playwright
-except ImportError as exc:  # pragma: no cover - graceful failure
+except ImportError as exc:
     missing = str(exc).split("'")[1]
     print(f"Missing dependency: install with `pip install {missing}`")
     raise SystemExit(1)
-
-from urllib.parse import quote_plus
 
 HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
@@ -23,21 +23,9 @@ HEADERS = {
 }
 
 USER_AGENTS = [
-    (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/125.0 Safari/537.36"
-    ),
-    (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0 Safari/537.36"
-    ),
-    (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/123.0 Safari/537.36"
-    ),
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36",
 ]
 
 PHONE_RE = re.compile(r"\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}")
@@ -97,16 +85,16 @@ def _fetch_html(url: str, debug: bool = False, retries: int = 3) -> str:
 
 def search_truepeoplesearch(address: str, debug: bool = False) -> List[Dict[str, object]]:
     """Searches TruePeopleSearch for the given address."""
-    print("Trying TruePeopleSearch...") if debug else None
-    url = (
-        "https://www.truepeoplesearch.com/results?" + f"streetaddress={quote_plus(address)}"
-    )
+    if debug:
+        print("Trying TruePeopleSearch...")
+    url = "https://www.truepeoplesearch.com/results?" + f"streetaddress={quote_plus(address)}"
     html = _fetch_html(url, debug=debug)
     if not html:
         return []
     soup = BeautifulSoup(html, "html.parser")
     cards = soup.select("div.card") or soup.select("div.result")
-    print(f"Found {len(cards)} cards...") if debug else None
+    if debug:
+        print(f"Found {len(cards)} cards...")
     results = []
     for card in cards:
         name_el = card.find("a", href=re.compile("/details"))
@@ -118,23 +106,23 @@ def search_truepeoplesearch(address: str, debug: bool = False) -> List[Dict[str,
         phone_text = card.get_text(" ")
         phones = _parse_phones(phone_text)
         if name or phones:
-            results.append(
-                {
-                    "name": name,
-                    "phones": phones,
-                    "city_state": location,
-                    "source": "TruePeopleSearch",
-                }
-            )
-    print("Parsing result...") if debug else None
-    if not results:
-        print("No matches found.") if debug else None
+            results.append({
+                "name": name,
+                "phones": phones,
+                "city_state": location,
+                "source": "TruePeopleSearch",
+            })
+    if debug:
+        print("Parsing result...")
+    if debug and not results:
+        print("No matches found.")
     return results
 
 
 def search_fastpeoplesearch(address: str, debug: bool = False) -> List[Dict[str, object]]:
     """Searches FastPeopleSearch for the given address."""
-    print("Trying FastPeopleSearch...") if debug else None
+    if debug:
+        print("Trying FastPeopleSearch...")
     slug = quote_plus(address.lower().replace(",", "").replace(" ", "-"))
     url = f"https://www.fastpeoplesearch.com/address/{slug}"
     html = _fetch_html(url, debug=debug)
@@ -142,7 +130,8 @@ def search_fastpeoplesearch(address: str, debug: bool = False) -> List[Dict[str,
         return []
     soup = BeautifulSoup(html, "html.parser")
     cards = soup.select("div.card") or soup.select("div.result")
-    print(f"Found {len(cards)} cards...") if debug else None
+    if debug:
+        print(f"Found {len(cards)} cards...")
     results = []
     for card in cards:
         name_el = card.find("a", href=re.compile("/person"))
@@ -154,17 +143,16 @@ def search_fastpeoplesearch(address: str, debug: bool = False) -> List[Dict[str,
         phone_text = card.get_text(" ")
         phones = _parse_phones(phone_text)
         if name or phones:
-            results.append(
-                {
-                    "name": name,
-                    "phones": phones,
-                    "city_state": location,
-                    "source": "FastPeopleSearch",
-                }
-            )
-    print("Parsing result...") if debug else None
-    if not results:
-        print("No matches found.") if debug else None
+            results.append({
+                "name": name,
+                "phones": phones,
+                "city_state": location,
+                "source": "FastPeopleSearch",
+            })
+    if debug:
+        print("Parsing result...")
+    if debug and not results:
+        print("No matches found.")
     return results
 
 
@@ -193,10 +181,14 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Simple skip tracer")
-    parser.add_argument("address", help="Full property address in quotes")
+    parser.add_argument("address", nargs="+", help="Full property address")
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
     args = parser.parse_args()
 
-    matches = skip_trace(args.address, debug=args.debug)
-    for match in matches:
-        print(match)
+    address_input = " ".join(args.address)
+    matches = skip_trace(address_input, debug=args.debug)
+    if not matches:
+        print("No matches found for this address.")
+    else:
+        for match in matches:
+            print(json.dumps(match, ensure_ascii=False))
