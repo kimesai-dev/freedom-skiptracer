@@ -80,29 +80,66 @@ def fetch_html(context, url: str, debug: bool) -> str:
 def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -> List[Dict[str, object]]:
     if debug:
         print("Trying TruePeopleSearch...")
-    url = "https://www.truepeoplesearch.com/results?streetaddress=" + address.replace(" ", "+")
+
+    page = context.new_page()
+    apply_stealth(page)
+    page.goto("https://www.truepeoplesearch.com/", wait_until="domcontentloaded", timeout=30000)
+
     try:
-        html = fetch_html(context, url, debug)
-    except Exception as e:
+        page.click("text=Address", timeout=5000)
+    except Exception:
+        pass
+
+    try:
+        input_selector = "input[type='text']"
+        page.fill(input_selector, address)
+    except Exception:
         if debug:
-            print(f"TruePeopleSearch failed: {e}")
+            print("Failed to locate address input field")
+        page.close()
         return []
+
+    try:
+        page.press(input_selector, "Enter")
+    except Exception:
+        try:
+            page.click("button[type='submit']")
+        except Exception:
+            if debug:
+                print("Failed to submit address search")
+            page.close()
+            return []
+
+    page.wait_for_load_state("domcontentloaded")
+    html = page.content()
+    if debug:
+        save_debug_html(html)
+
     soup = BeautifulSoup(html, "html.parser")
-    cards = soup.select("div.card")
+    cards = soup.select("div.card a[href*='/details']")
     if debug:
         print(f"Found {len(cards)} cards on TruePeopleSearch")
     if inspect:
         for card in cards:
             print("TPS card:\n", card.get_text(" ", strip=True))
+
     results = []
-    for card in cards:
-        name_el = card.find("a", href=re.compile("/details"))
-        if not name_el:
+    for link in cards:
+        href = link.get("href")
+        if not href:
             continue
-        name = name_el.get_text(strip=True)
-        loc_el = card.find("div", class_=re.compile("address"))
-        location = loc_el.get_text(strip=True) if loc_el else ""
-        phones = _parse_phones(card.get_text(" "))
+        detail_url = href if href.startswith("http") else f"https://www.truepeoplesearch.com{href}"
+        detail_html = fetch_html(context, detail_url, debug)
+        detail_soup = BeautifulSoup(detail_html, "html.parser")
+        name_el = detail_soup.find(["h1", "h2", "strong"])
+        name = name_el.get_text(strip=True) if name_el else ""
+        loc_el = detail_soup.find(string=re.compile("Current Address", re.I))
+        if loc_el and loc_el.find_parent("div"):
+            location_div = loc_el.find_parent("div").find_next_sibling("div")
+            location = location_div.get_text(strip=True) if location_div else ""
+        else:
+            location = ""
+        phones = _parse_phones(detail_soup.get_text(" "))
         if name or phones:
             results.append({
                 "name": name,
@@ -110,6 +147,7 @@ def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -
                 "city_state": location,
                 "source": "TruePeopleSearch",
             })
+    page.close()
     return results
 
 def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -> List[Dict[str, object]]:
