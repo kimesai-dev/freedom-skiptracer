@@ -1,10 +1,11 @@
-"""Simple skip tracer using Playwright to scrape public sites."""
-
-import os
+import argparse
+import json
 import random
 import re
-import json
-from typing import List, Dict
+import time
+import os
+from pathlib import Path
+from typing import Dict, List
 from urllib.parse import quote_plus
 
 try:
@@ -15,20 +16,14 @@ except ImportError as exc:
     print(f"Missing dependency: install with `pip install {missing}`")
     raise SystemExit(1)
 
-HEADERS = {
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Connection": "keep-alive",
-}
-
-USER_AGENTS = [
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36",
-]
-
 PHONE_RE = re.compile(r"\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}")
+
+# Common desktop user agents
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:118.0) Gecko/20100101 Firefox/118.0",
+]
 
 
 def _normalize_phone(number: str) -> str:
@@ -41,70 +36,57 @@ def _normalize_phone(number: str) -> str:
 def _parse_phones(text: str) -> List[str]:
     phones = set()
     for match in PHONE_RE.findall(text or ""):
-        normalized = _normalize_phone(match)
-        phones.add(normalized)
+        phones.add(_normalize_phone(match))
     return list(phones)
 
 
-def _ensure_logs():
-    os.makedirs("logs", exist_ok=True)
+def save_debug_html(html: str) -> None:
+    Path("logs").mkdir(exist_ok=True)
+    Path("logs/debug_last.html").write_text(html)
 
 
-def _fetch_html(url: str, debug: bool = False, retries: int = 3) -> str:
-    """Fetches the given URL using Playwright and returns HTML."""
-    last_html = ""
-    for attempt in range(retries):
-        ua = random.choice(USER_AGENTS)
-        if debug:
-            print(f"Fetching {url} (attempt {attempt + 1})")
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context(user_agent=ua, extra_http_headers=HEADERS)
-            page = context.new_page()
-            try:
-                response = page.goto(url, wait_until="domcontentloaded", timeout=15000)
-                status = response.status if response else None
-                last_html = page.content()
-                if status == 403:
-                    if debug:
-                        print("Blocked — retrying with new headers")
-                    browser.close()
-                    continue
-                return last_html
-            except Exception as exc:
-                if debug:
-                    print(f"Error: {exc}")
-            finally:
-                browser.close()
-    if debug and last_html:
-        _ensure_logs()
-        with open("logs/debug_last.html", "w", encoding="utf-8") as fh:
-            fh.write(last_html)
-    return last_html
+def apply_stealth(page) -> None:
+    """Inject basic stealth scripts into the page."""
+    page.add_init_script(
+        """
+        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+        window.chrome = window.chrome || { runtime: {} };
+        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+        """
+    )
 
 
-def search_truepeoplesearch(address: str, debug: bool = False) -> List[Dict[str, object]]:
-    """Searches TruePeopleSearch for the given address."""
+def fetch_html(context, url: str, debug: bool) -> str:
+    page = context.new_page()
+    apply_stealth(page)
+    response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    time.sleep(random.uniform(0.3, 0.7))
+    html = page.content()
     if debug:
-        print("Trying TruePeopleSearch...")
-    url = "https://www.truepeoplesearch.com/results?" + f"streetaddress={quote_plus(address)}"
-    html = _fetch_html(url, debug=debug)
-    if not html:
-        return []
+        save_debug_html(html)
+    if response and response.status >= 400:
+        raise ValueError(f"HTTP {response.status}")
+    page.close()
+    return html
+
+
+def search_truepeoplesearch(context, address: str, debug: bool) -> List[Dict[str, object]]:
+    print("Trying TruePeopleSearch...") if debug else None
+    url = "https://www.truepeoplesearch.com/results?streetaddress=" + address.replace(" ", "+")
+    html = fetch_html(context, url, debug)
     soup = BeautifulSoup(html, "html.parser")
-    cards = soup.select("div.card") or soup.select("div.result")
-    if debug:
-        print(f"Found {len(cards)} cards...")
+    cards = soup.select("div.card")
+    print(f"Found {len(cards)} cards on TruePeopleSearch") if debug else None
     results = []
     for card in cards:
         name_el = card.find("a", href=re.compile("/details"))
         if not name_el:
             continue
         name = name_el.get_text(strip=True)
-        location_el = card.find("div", class_=re.compile("address"))
-        location = location_el.get_text(strip=True) if location_el else ""
-        phone_text = card.get_text(" ")
-        phones = _parse_phones(phone_text)
+        loc_el = card.find("div", class_=re.compile("address"))
+        location = loc_el.get_text(strip=True) if loc_el else ""
+        phones = _parse_phones(card.get_text(" "))
         if name or phones:
             results.append({
                 "name": name,
@@ -112,36 +94,26 @@ def search_truepeoplesearch(address: str, debug: bool = False) -> List[Dict[str,
                 "city_state": location,
                 "source": "TruePeopleSearch",
             })
-    if debug:
-        print("Parsing result...")
-    if debug and not results:
-        print("No matches found.")
     return results
 
 
-def search_fastpeoplesearch(address: str, debug: bool = False) -> List[Dict[str, object]]:
-    """Searches FastPeopleSearch for the given address."""
-    if debug:
-        print("Trying FastPeopleSearch...")
-    slug = quote_plus(address.lower().replace(",", "").replace(" ", "-"))
+def search_fastpeoplesearch(context, address: str, debug: bool) -> List[Dict[str, object]]:
+    print("Trying FastPeopleSearch...") if debug else None
+    slug = address.lower().replace(",", "").replace(" ", "-")
     url = f"https://www.fastpeoplesearch.com/address/{slug}"
-    html = _fetch_html(url, debug=debug)
-    if not html:
-        return []
+    html = fetch_html(context, url, debug)
     soup = BeautifulSoup(html, "html.parser")
-    cards = soup.select("div.card") or soup.select("div.result")
-    if debug:
-        print(f"Found {len(cards)} cards...")
+    cards = soup.select("div.card")
+    print(f"Found {len(cards)} cards on FastPeopleSearch") if debug else None
     results = []
     for card in cards:
         name_el = card.find("a", href=re.compile("/person"))
         if not name_el:
             continue
         name = name_el.get_text(strip=True)
-        location_el = card.find("div", class_=re.compile("address"))
-        location = location_el.get_text(strip=True) if location_el else ""
-        phone_text = card.get_text(" ")
-        phones = _parse_phones(phone_text)
+        loc_el = card.find("div", class_=re.compile("address"))
+        location = loc_el.get_text(strip=True) if loc_el else ""
+        phones = _parse_phones(card.get_text(" "))
         if name or phones:
             results.append({
                 "name": name,
@@ -149,46 +121,38 @@ def search_fastpeoplesearch(address: str, debug: bool = False) -> List[Dict[str,
                 "city_state": location,
                 "source": "FastPeopleSearch",
             })
-    if debug:
-        print("Parsing result...")
-    if debug and not results:
-        print("No matches found.")
     return results
 
 
-def skip_trace(address: str, debug: bool = False) -> List[Dict[str, object]]:
-    """Returns matches for the given property address."""
-    try:
-        results = search_truepeoplesearch(address, debug=debug)
-        if results:
-            return results
-    except Exception as exc:
-        if debug:
-            print(f"TruePeopleSearch error: {exc}")
+def skip_trace(address: str, visible: bool = False, proxy: str | None = None, debug: bool = False) -> List[Dict[str, object]]:
+    ua = random.choice(USER_AGENTS)
+    with sync_playwright() as p:
+        launch_args = {"headless": not visible}
+        if proxy:
+            launch_args["proxy"] = {"server": proxy}
+        browser = p.chromium.launch(**launch_args)
+        context = browser.new_context(user_agent=ua, viewport={"width": 1366, "height": 768})
+        results = search_truepeoplesearch(context, address, debug)
+        if not results:
+            results = search_fastpeoplesearch(context, address, debug)
+        browser.close()
+    return results
 
-    try:
-        results = search_fastpeoplesearch(address, debug=debug)
-        if results:
-            return results
-    except Exception as exc:
-        if debug:
-            print(f"FastPeopleSearch error: {exc}")
 
-    return []
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Free skip tracing")
+    parser.add_argument("address", help="Property address")
+    parser.add_argument("--debug", action="store_true", help="Save last HTML response")
+    parser.add_argument("--visible", action="store_true", help="Run browser visibly")
+    parser.add_argument("--proxy", help="Proxy server e.g. http://user:pass@host:port")
+    args = parser.parse_args()
+
+    matches = skip_trace(args.address, visible=args.visible, proxy=args.proxy, debug=args.debug)
+    if matches:
+        print(json.dumps(matches, indent=2))
+    else:
+        print("No matches found for this address.")
 
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Simple skip tracer")
-    parser.add_argument("address", nargs="+", help="Full property address")
-    parser.add_argument("--debug", action="store_true", help="Enable debug output")
-    args = parser.parse_args()
-
-    address_input = " ".join(args.address)
-    matches = skip_trace(address_input, debug=args.debug)
-    if not matches:
-        print("No matches found for this address.")
-    else:
-        for match in matches:
-            print(json.dumps(match, ensure_ascii=False))
+    main()

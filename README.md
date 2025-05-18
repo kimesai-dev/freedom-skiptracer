@@ -9,7 +9,11 @@ avoid simple anti-bot protections.
 
 ```bash
 pip install -r requirements.txt
-python skiptracer.py "709 W High St, Portland, IN" --debug
+python skiptracer.py "709 W High St, Portland, IN"
+Optional flags:
+--visible        # show the browser instead of running headless
+--proxy URL      # launch the browser using a proxy
+--debug          # save the last fetched HTML to logs/debug_last.html
 Use --debug to print verbose logs and save the last HTML response to
 logs/debug_last.html when a request fails or is blocked.
 
@@ -30,27 +34,8 @@ Only publicly available information is queried and returned.
 
 ---
 
-### ✅ `requirements.txt` (Final Version)
+✅ After pasting this:
+1. Click **“Mark as resolved”**
+2. Click **“Commit merge”**
 
-playwright
-beautifulsoup4
-requests
-
-
-> Note: After pulling this, you should run:
-> ```bash
-> pip install -r requirements.txt
-> playwright install
-> ```
-
----
-
-### ✅ `skiptracer.py` — Clean Version Summary
-
-If Codex has already pushed the Playwright-based version, don’t re-resolve it by hand — just choose the full Codex version during conflict resolution.
-
-But if you want to fully overwrite it manually, use this command:
-
-```bash
-git checkout --theirs skiptracer.py
-Or copy-paste the full clean version from earlier (with _fetch(), debug handling, Playwright logic, etc.)
+Let me know if you want the updated `requirements.txt` or `skiptracer.py` next — you’re resolving this repo like a pro engineer.
