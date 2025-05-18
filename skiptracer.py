@@ -1,3 +1,62 @@
+import argparse
+import json
+import os
+import random
+import re
+import time
+from pathlib import Path
+from typing import List, Dict
+from urllib.parse import quote_plus
+
+try:
+    from bs4 import BeautifulSoup
+    from playwright.sync_api import sync_playwright
+except ImportError as exc:
+    missing = str(exc).split("'")[1]
+    print(f"Missing dependency: install with `pip install {missing}`")
+    raise SystemExit(1)
+
+PHONE_RE = re.compile(r"\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}")
+
+# Common desktop user agents
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:118.0) Gecko/20100101 Firefox/118.0",
+]
+
+
+def _normalize_phone(number: str) -> str:
+    digits = re.sub(r"\D", "", number)
+    if len(digits) == 10:
+        return f"+1 ({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+    return number
+
+
+def _parse_phones(text: str) -> List[str]:
+    phones = set()
+    for match in PHONE_RE.findall(text or ""):
+        phones.add(_normalize_phone(match))
+    return list(phones)
+
+
+def save_debug_html(html: str) -> None:
+    Path("logs").mkdir(exist_ok=True)
+    Path("logs/debug_last.html").write_text(html)
+
+
+def apply_stealth(page) -> None:
+    """Inject basic stealth scripts into the page."""
+    page.add_init_script(
+        """
+        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+        window.chrome = window.chrome || { runtime: {} };
+        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+        """
+    )
+
+
 def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -> List[Dict[str, object]]:
     if debug:
         print("Trying TruePeopleSearch...")
