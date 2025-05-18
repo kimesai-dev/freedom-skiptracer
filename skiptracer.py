@@ -1,5 +1,6 @@
 import re
 from typing import List, Dict
+from urllib.parse import quote_plus
 
 try:
     import requests
@@ -12,8 +13,6 @@ try:
 except ModuleNotFoundError:
     print("Missing dependency: install with pip install beautifulsoup4")
     raise SystemExit(1)
-
-from urllib.parse import quote_plus
 
 HEADERS = {
     "User-Agent": (

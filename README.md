@@ -6,13 +6,7 @@ sources for phone numbers associated with a property address.
 ## Usage
 
 ```
-pip install -r requirements.txt
-python3 skiptracer.py "709 W High St, Portland, IN"
-```
 
-or simply:
-
-```
 python skiptracer.py "709 W High St, Portland, IN"
 ```
 
