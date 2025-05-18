@@ -2,19 +2,7 @@ import argparse
 import json
 import random
 import re
-import time
-import os
-from pathlib import Path
-from typing import Dict, List
-from urllib.parse import quote_plus
 
-try:
-    from bs4 import BeautifulSoup
-    from playwright.sync_api import sync_playwright
-except ImportError as exc:
-    missing = str(exc).split("'")[1]
-    print(f"Missing dependency: install with `pip install {missing}`")
-    raise SystemExit(1)
 
 PHONE_RE = re.compile(r"\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}")
 

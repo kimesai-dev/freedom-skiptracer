@@ -7,8 +7,7 @@ avoid simple anti-bot protections.
 
 ## Usage
 
-```bash
-pip install -r requirements.txt
+
 python skiptracer.py "709 W High St, Portland, IN"
 Optional flags:
 --visible        # show the browser instead of running headless
