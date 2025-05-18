@@ -50,6 +50,20 @@ def apply_stealth(page) -> None:
         """
     )
 
+def fetch_html(context, url: str, debug: bool) -> str:
+    """Navigate to a URL in a fresh page and return the HTML."""
+    page = context.new_page()
+    apply_stealth(page)
+    response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    time.sleep(random.uniform(0.3, 0.7))
+    html = page.content()
+    if debug:
+        save_debug_html(html)
+    if response and response.status >= 400:
+        raise ValueError(f"HTTP {response.status}")
+    page.close()
+    return html
+
 def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -> List[Dict[str, object]]:
     if debug:
         print("Trying TruePeopleSearch...")
@@ -91,7 +105,35 @@ def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -
     page.wait_for_load_state("domcontentloaded")
     html = page.content()
     if debug:
-        save_debug_html(html)
+        Path("logs").mkdir(exist_ok=True)
+        Path("logs/page_after_submit.html").write_text(html)
+
+    lower_html = html.lower()
+    bot_check = False
+    if (
+        "are you a human" in lower_html
+        or "robot check" in lower_html
+        or ("verify" in lower_html and "robot" in lower_html)
+    ):
+        bot_check = True
+    else:
+        try:
+            if page.locator("text=verify", has_text="robot").first.is_visible(timeout=1000):
+                bot_check = True
+        except Exception:
+            pass
+
+    if bot_check:
+        print("Bot check detected — waiting 10s and retrying...")
+        if debug:
+            Path("logs/page_after_submit.html").write_text(html)
+        page.pause()
+        time.sleep(10)
+        page.reload()
+        page.wait_for_load_state("domcontentloaded")
+        html = page.content()
+        if debug:
+            save_debug_html(html)
 
     soup = BeautifulSoup(html, "html.parser")
     cards = soup.select("div.card a[href*='/details']")
