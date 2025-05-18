@@ -21,8 +21,11 @@ Optional flags:
 - `--debug` – Save the last HTML response to `logs/debug_last.html`
 - `--visible` – Launch the browser in non-headless mode
 - `--proxy URL` – Launch the browser using a proxy (e.g., `http://user:pass@host:port`)
+- You can provide multiple comma-separated proxies and one will be chosen at random
 - `--fast` – Include FastPeopleSearch (may trigger bot checks)
 - `--save` – Write results to `results.json`
+- `--wait SECONDS` – Extra delay after navigation to appear more human
+
 
 Use `--debug` to print verbose logs and save the last HTML response when a request fails or is blocked.
 
