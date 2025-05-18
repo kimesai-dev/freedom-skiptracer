@@ -75,8 +75,35 @@ def search_truepeoplesearch(context, address: str, debug: bool) -> List[Dict[str
     if debug:
         print("Trying TruePeopleSearch...")
 
-    url = "https://www.truepeoplesearch.com/results?streetaddress=" + address.replace(" ", "+")
-    html = fetch_html(context, url, debug)
+    page = context.new_page()
+    apply_stealth(page)
+    page.goto("https://www.truepeoplesearch.com/", wait_until="domcontentloaded", timeout=30000)
+
+    try:
+        page.click("a[href*='Address']")
+        address_input = page.locator("input[placeholder*='City']").first
+        address_input.wait_for(timeout=5000)
+        address_input.type(address, delay=75)
+    except Exception:
+        if debug:
+            print("Failed to locate or type into address input field")
+        html = page.content()
+        if debug:
+            save_debug_html(html)
+        page.close()
+        return []
+
+    try:
+        page.click("button[type='submit']")
+    except Exception:
+        page.keyboard.press("Enter")
+
+    page.wait_for_load_state("domcontentloaded")
+    html = page.content()
+    if debug:
+        save_debug_html(html)
+    page.close()
+
     soup = BeautifulSoup(html, "html.parser")
     cards = soup.select("div.card")
     if debug:
@@ -132,17 +159,31 @@ def search_fastpeoplesearch(context, address: str, debug: bool) -> List[Dict[str
     return results
 
 
-def skip_trace(address: str, visible: bool = False, proxy: str | None = None, debug: bool = False) -> List[Dict[str, object]]:
+def skip_trace(
+    address: str,
+    visible: bool = False,
+    proxy: str | None = None,
+    include_fastpeoplesearch: bool = False,
+    debug: bool = False,
+) -> List[Dict[str, object]]:
     ua = random.choice(USER_AGENTS)
     with sync_playwright() as p:
         launch_args = {"headless": not visible}
         if proxy:
             launch_args["proxy"] = {"server": proxy}
         browser = p.chromium.launch(**launch_args)
-        context = browser.new_context(user_agent=ua, viewport={"width": 1366, "height": 768})
+        context = browser.new_context(
+            user_agent=ua, viewport={"width": 1366, "height": 768}
+        )
         results = search_truepeoplesearch(context, address, debug)
-        if not results:
-            results = search_fastpeoplesearch(context, address, debug)
+
+        if include_fastpeoplesearch:
+            try:
+                fps_results = search_fastpeoplesearch(context, address, debug)
+                results.extend(fps_results)
+            except Exception as exc:  # pragma: no cover - network call
+                if debug:
+                    print(f"FastPeopleSearch failed: {exc}")
         browser.close()
     return results
 
@@ -153,9 +194,29 @@ def main() -> None:
     parser.add_argument("--debug", action="store_true", help="Save last HTML response")
     parser.add_argument("--visible", action="store_true", help="Run browser visibly")
     parser.add_argument("--proxy", help="Proxy server e.g. http://user:pass@host:port")
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="Include FastPeopleSearch (may trigger bot checks)",
+    )
+    parser.add_argument(
+        "--save",
+        action="store_true",
+        help="Write results to results.json",
+    )
     args = parser.parse_args()
 
-    matches = skip_trace(args.address, visible=args.visible, proxy=args.proxy, debug=args.debug)
+    matches = skip_trace(
+        args.address,
+        visible=args.visible,
+        proxy=args.proxy,
+        include_fastpeoplesearch=args.fast,
+        debug=args.debug,
+    )
+
+    if args.save:
+        Path("results.json").write_text(json.dumps(matches, indent=2))
+
     if matches:
         print(json.dumps(matches, indent=2))
     else:
