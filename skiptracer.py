@@ -102,6 +102,7 @@ def fetch_html(context, url: str, debug: bool) -> str:
 
 
 
+
 def random_mouse_movement(page, times: int | None = None) -> None:
     """Move the mouse around randomly to appear more human."""
     times = times or random.randint(3, 7)
@@ -175,12 +176,20 @@ def search_truepeoplesearch(
         street, city_state = [part.strip() for part in address.split(",", 1)]
 
     try:
+     try:
+        street, cityzip = address.split(",", 1)
+    except ValueError:
+        street, cityzip = address, ""
 
         address_input = page.locator("input[placeholder*='Enter name']").first
+        city_input = page.locator("input[placeholder*='City']").first
         address_input.wait_for(timeout=5000)
-        for ch in address:
-            address_input.type(ch, delay=random.randint(50, 120))
-        random_mouse_movement(page, 2)
+        city_input.wait_for(timeout=5000)
+        address_input.fill(street.strip())
+        if cityzip:
+            city_input.fill(cityzip.strip())
+        else:
+            city_input.fill("")
 
     except Exception:
         if debug:
@@ -192,8 +201,8 @@ def search_truepeoplesearch(
         return []
 
     try:
+page.press("input[placeholder*='City']", "Enter")
 
-        address_input.press("Enter")
         time.sleep(3)
     except Exception:
         try:
@@ -219,16 +228,15 @@ def search_truepeoplesearch(
         Path("logs/page_after_submit.html").write_text(html)
 
     lower_html = html.lower()
-
-    if "press & hold" in lower_html:
-        print("Press & Hold challenge detected")
-        if manual and visible:
-            page.pause()
-        else:
-            handle_press_and_hold(page, debug)
-            page.wait_for_load_state("domcontentloaded")
-            html = page.content()
-            lower_html = html.lower()
+if "press & hold" in lower_html:
+    print("Press & Hold challenge detected")
+    if manual and visible:
+        page.pause()
+    else:
+        handle_press_and_hold(page, debug)
+        page.wait_for_load_state("domcontentloaded")
+        html = page.content()
+        lower_html = html.lower()
 
     bot_check = False
     if (
@@ -248,6 +256,7 @@ def search_truepeoplesearch(
             pass
 
 
+
     if "press & hold" in lower_html and "confirm you are a human" in lower_html:
         print("Press & Hold challenge detected — attempting to solve")
         solved = handle_press_and_hold(page, debug)
@@ -260,12 +269,14 @@ def search_truepeoplesearch(
         print("Bot check detected — waiting 10s and retrying...")
         if debug:
             save_debug_html(html)
+
         page.pause()
         time.sleep(10)
         page.reload()
         page.wait_for_load_state("domcontentloaded")
 
         random_mouse_movement(page)
+
         html = page.content()
         if debug:
             save_debug_html(html)
