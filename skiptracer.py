@@ -36,9 +36,9 @@ def _parse_phones(text: str) -> List[str]:
         phones.add(_normalize_phone(match))
     return list(phones)
 
-def save_debug_html(html: str) -> None:
+def save_debug_html(html: str, name: str = "debug_last.html") -> None:
     Path("logs").mkdir(exist_ok=True)
-    Path("logs/debug_last.html").write_text(html)
+    Path(f"logs/{name}").write_text(html)
 
 def apply_stealth(page) -> None:
     page.add_init_script(
@@ -51,7 +51,6 @@ def apply_stealth(page) -> None:
     )
 
 def random_mouse_movement(page, width: int = 1366, height: int = 768) -> None:
-    """Move the mouse around randomly to appear less like a bot."""
     for _ in range(random.randint(5, 10)):
         x = random.randint(0, width)
         y = random.randint(0, height)
@@ -59,7 +58,6 @@ def random_mouse_movement(page, width: int = 1366, height: int = 768) -> None:
         time.sleep(random.uniform(0.05, 0.2))
 
 def handle_press_and_hold(page, debug: bool) -> bool:
-    """Attempt to solve the 'Press & Hold' challenge automatically."""
     try:
         button = page.locator("text=Press & Hold").first
         button.wait_for(timeout=7000)
@@ -71,8 +69,7 @@ def handle_press_and_hold(page, debug: bool) -> bool:
         page.mouse.up()
         page.wait_for_load_state("networkidle", timeout=15000)
         if debug:
-            Path("logs").mkdir(exist_ok=True)
-            Path("logs/after_press_hold.html").write_text(page.content())
+            save_debug_html(page.content(), name="after_press_hold.html")
         return True
     except Exception as e:
         if debug:
@@ -80,7 +77,6 @@ def handle_press_and_hold(page, debug: bool) -> bool:
         return False
 
 def fetch_html(context, url: str, debug: bool) -> str:
-    """Navigate to a URL in a fresh page and return the HTML."""
     page = context.new_page()
     apply_stealth(page)
     random_mouse_movement(page)
@@ -115,7 +111,7 @@ def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -
     try:
         address_input = page.locator("input[placeholder*='Enter name']").first
         address_input.wait_for(timeout=5000)
-        address_input.type(address, delay=75)
+        address_input.type(address, delay=random.randint(50, 100))
     except Exception:
         if debug:
             print("Failed to locate or type into address input field")
@@ -127,6 +123,7 @@ def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -
 
     try:
         address_input.press("Enter")
+        time.sleep(3)
     except Exception:
         try:
             page.click("button[type='submit']")
@@ -142,10 +139,10 @@ def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -
         page.mouse.wheel(0, random.randint(200, 800))
         time.sleep(random.uniform(0.3, 0.8))
     random_mouse_movement(page)
+
     html = page.content()
     if debug:
-        Path("logs").mkdir(exist_ok=True)
-        Path("logs/page_after_submit.html").write_text(html)
+        save_debug_html(html, name="page_after_submit.html")
 
     lower_html = html.lower()
     bot_check = False
@@ -174,7 +171,7 @@ def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -
     if bot_check:
         print("Bot check detected — waiting 10s and retrying...")
         if debug:
-            Path("logs/page_after_submit.html").write_text(html)
+            save_debug_html(html)
         page.pause()
         time.sleep(10)
         page.reload()
@@ -188,6 +185,8 @@ def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -
     cards = soup.select("div.card a[href*='/details']")
     if debug:
         print(f"Found {len(cards)} cards on TruePeopleSearch")
+    if len(cards) == 0:
+        print("No cards found — likely bot block or bad selector.")
     if inspect:
         for card in cards:
             print("TPS card:\n", card.get_text(" ", strip=True))
@@ -198,7 +197,12 @@ def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -
         if not href:
             continue
         detail_url = href if href.startswith("http") else f"https://www.truepeoplesearch.com{href}"
-        detail_html = fetch_html(context, detail_url, debug)
+        try:
+            detail_html = fetch_html(context, detail_url, debug)
+        except Exception as e:
+            if debug:
+                print(f"Error loading detail page: {e}")
+            continue
         detail_soup = BeautifulSoup(detail_html, "html.parser")
         name_el = detail_soup.find(["h1", "h2", "strong"])
         name = name_el.get_text(strip=True) if name_el else ""
@@ -219,12 +223,75 @@ def search_truepeoplesearch(context, address: str, debug: bool, inspect: bool) -
     page.close()
     return results
 
+def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -> List[Dict[str, object]]:
+    if debug:
+        print("Trying FastPeopleSearch...")
+
+    slug = quote_plus(address.lower().replace(",", "").replace(" ", "-"))
+    url = f"https://www.fastpeoplesearch.com/address/{slug}"
+
+    page = context.new_page()
+    apply_stealth(page)
+    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    time.sleep(3)
+    try:
+        page.wait_for_selector("div.card", timeout=8000)
+    except Exception:
+        pass
+    page.mouse.wheel(0, random.randint(200, 800))
+    html = page.content()
+    if debug:
+        save_debug_html(html)
+
+    soup = BeautifulSoup(html, "html.parser")
+    cards = soup.select("div.card a[href*='/person']")
+    if debug:
+        print(f"Found {len(cards)} cards on FastPeopleSearch")
+    if len(cards) == 0:
+        print("No cards found — likely bot block or bad selector.")
+    if inspect:
+        for card in cards:
+            print("FPS card:\n", card.get_text(" ", strip=True))
+
+    results = []
+    for link in cards:
+        href = link.get("href")
+        if not href:
+            continue
+        detail_url = href if href.startswith("http") else f"https://www.fastpeoplesearch.com{href}"
+        try:
+            detail_html = fetch_html(context, detail_url, debug)
+        except Exception as e:
+            if debug:
+                print(f"Error loading detail page: {e}")
+            continue
+        detail_soup = BeautifulSoup(detail_html, "html.parser")
+        name_el = detail_soup.find(["h1", "h2", "strong"])
+        name = name_el.get_text(strip=True) if name_el else ""
+        loc_el = detail_soup.find(string=re.compile("Current Address", re.I))
+        if loc_el and loc_el.find_parent("div"):
+            location_div = loc_el.find_parent("div").find_next_sibling("div")
+            location = location_div.get_text(strip=True) if location_div else ""
+        else:
+            location = ""
+        phones = _parse_phones(detail_soup.get_text(" "))
+        if name or phones:
+            results.append({
+                "name": name,
+                "phones": phones,
+                "city_state": location,
+                "source": "FastPeopleSearch",
+            })
+    page.close()
+    return results
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Autonomous skip tracing tool")
     parser.add_argument("address", help="Property address")
     parser.add_argument("--debug", action="store_true", help="Save HTML and log status codes")
     parser.add_argument("--visible", action="store_true", help="Show browser during scrape")
     parser.add_argument("--inspect", action="store_true", help="Print raw HTML card text")
+    parser.add_argument("--fast", action="store_true", help="Include FastPeopleSearch")
     parser.add_argument("--save", action="store_true", help="Write results to results.json")
     args = parser.parse_args()
 
@@ -232,7 +299,19 @@ def main() -> None:
         browser = p.chromium.launch(headless=not args.visible)
         context = browser.new_context(user_agent=random.choice(USER_AGENTS), viewport={"width": 1366, "height": 768})
 
-        results = search_truepeoplesearch(context, args.address, args.debug, args.inspect)
+        results: List[Dict[str, object]] = []
+        try:
+            results.extend(search_truepeoplesearch(context, args.address, args.debug, args.inspect))
+        except Exception as e:
+            if args.debug:
+                print(f"TruePeopleSearch failed: {e}")
+
+        if args.fast:
+            try:
+                results.extend(search_fastpeoplesearch(context, args.address, args.debug, args.inspect))
+            except Exception as e:
+                if args.debug:
+                    print(f"FastPeopleSearch failed: {e}")
 
         context.close()
         browser.close()
