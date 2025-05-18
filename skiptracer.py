@@ -59,39 +59,36 @@ def save_debug_html(html: str) -> None:
 
 
 def apply_stealth(page) -> None:
-    vendor = random.choice(["Google Inc.", "Apple Computer, Inc.", "Microsoft Corporation"])
-    languages = random.choice([
-        ["en-US", "en"],
-        ["en-US", "en", "fr"],
-        ["en-US"],
-    ])
+    plugin_count = random.randint(3, 5)
+    hardware = random.choice([2, 4, 8])
+    touch = random.choice([0, 1])
     page.add_init_script(
         f"""
-        Object.defineProperty(navigator, 'webdriver', {{get: () => undefined}});
+        Object.defineProperty(navigator, 'webdriver', {{ get: () => undefined }});
         window.chrome = window.chrome || {{ runtime: {{}} }};
-        Object.defineProperty(navigator, 'plugins', {{ get: () => [1, 2, 3, 4] }});
-        Object.defineProperty(navigator, 'languages', {{ get: () => {json.dumps(languages)} }});
-        Object.defineProperty(navigator, 'vendor', {{ get: () => '{vendor}' }});
+        Object.defineProperty(navigator, 'plugins', {{ get: () => new Array({plugin_count}).fill(1) }});
+        Object.defineProperty(navigator, 'languages', {{ get: () => ['en-US', 'en'] }});
+        Object.defineProperty(navigator, 'hardwareConcurrency', {{ get: () => {hardware} }});
+        Object.defineProperty(navigator, 'maxTouchPoints', {{ get: () => {touch} }});
         """
     )
 
 
-def fetch_html(context, url: str, debug: bool, wait: float) -> str:
+def fetch_html(context, url: str, debug: bool, wait: float = 0.0) -> str:
     page = context.new_page()
     apply_stealth(page)
     response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
-    time.sleep(random.uniform(1, 2) + wait)
+    time.sleep(wait or random.uniform(0.3, 0.7))
     html = page.content()
     if debug:
         save_debug_html(html)
     if response and response.status >= 400:
-        raise ValueError(f"HTTP {response.status}")
+        if debug:
+            print(f"HTTP {response.status} — possible bot trap or error page.")
+        page.close()
+        return html
     page.close()
     return html
-
-
-def is_bot_trap(html: str) -> bool:
-    return BOT_TRAP_TEXT in html
 
 
 def search_truepeoplesearch(context, address: str, wait: float, debug: bool) -> List[Dict[str, object]]:
@@ -100,14 +97,13 @@ def search_truepeoplesearch(context, address: str, wait: float, debug: bool) -> 
 
     url = "https://www.truepeoplesearch.com/results?streetaddress=" + address.replace(" ", "+")
     html = fetch_html(context, url, debug, wait)
-    if is_bot_trap(html):
+    if BOT_TRAP_TEXT in html:
         if debug:
-            print("Bot trap detected on TruePeopleSearch. Retrying...")
-        time.sleep(random.uniform(1, 2) + wait)
+            print("Bot trap detected, retrying...")
+        time.sleep(wait or random.uniform(1.0, 2.0))
         html = fetch_html(context, url, debug, wait)
-        if is_bot_trap(html):
-            if debug:
-                print("Still blocked by bot trap on TruePeopleSearch.")
+        if BOT_TRAP_TEXT in html and debug:
+            print("Bot trap page persisted after retry.")
             return []
 
     soup = BeautifulSoup(html, "html.parser")
@@ -168,11 +164,6 @@ def search_fastpeoplesearch(context, address: str, wait: float, debug: bool) -> 
 def skip_trace(address: str, visible: bool = False, proxy: str | None = None, include_fastpeoplesearch: bool = False, wait: float = 0.0, debug: bool = False) -> List[Dict[str, object]]:
     ua = random.choice(USER_AGENTS)
     viewport = random.choice(VIEWPORTS)
-    headers = {
-        "Accept-Language": random.choice(ACCEPT_LANGS),
-        "Accept": random.choice(ACCEPTS),
-        "Referer": random.choice(REFERERS),
-    }
 
     def pick_proxy(value: str | None) -> str | None:
         if not value:
@@ -186,11 +177,7 @@ def skip_trace(address: str, visible: bool = False, proxy: str | None = None, in
         if selected_proxy:
             launch_args["proxy"] = {"server": selected_proxy}
         browser = p.chromium.launch(**launch_args)
-        context = browser.new_context(
-            user_agent=ua,
-            viewport=viewport,
-            extra_http_headers=headers,
-        )
+        context = browser.new_context(user_agent=ua, viewport=viewport)
         results = search_truepeoplesearch(context, address, wait, debug)
 
         if include_fastpeoplesearch:
@@ -212,7 +199,7 @@ def main() -> None:
     parser.add_argument("--proxy", help="Proxy server e.g. http://user:pass@host:port")
     parser.add_argument("--fast", action="store_true", help="Include FastPeopleSearch (may trigger bot checks)")
     parser.add_argument("--save", action="store_true", help="Write results to results.json")
-    parser.add_argument("--wait", type=float, default=0.0, help="Additional wait time after navigation")
+    parser.add_argument("--wait", type=float, default=0.0, help="Seconds to wait after each page load")
     args = parser.parse_args()
 
     matches = skip_trace(
