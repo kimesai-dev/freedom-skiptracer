@@ -1,42 +1,34 @@
-import re
-import sys
-import json
-import time
+"""Simple skip tracer using Playwright to scrape public sites."""
+
 import os
 import random
-from pathlib import Path
+import re
+import json
 from typing import List, Dict
 from urllib.parse import quote_plus
 
 try:
-    import requests
     from bs4 import BeautifulSoup
-except ImportError as e:
-    missing = str(e).split("'")[1]
-    print(f"Missing dependency: install with 'pip install {missing}'")
-    sys.exit(1)
+    from playwright.sync_api import sync_playwright
+except ImportError as exc:
+    missing = str(exc).split("'")[1]
+    print(f"Missing dependency: install with `pip install {missing}`")
+    raise SystemExit(1)
 
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
-    "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/117.0",
-]
-
-DEFAULT_HEADERS = {
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+HEADERS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
     "Accept-Encoding": "gzip, deflate, br",
     "Connection": "keep-alive",
 }
 
-LOG_DIR = Path("logs")
+USER_AGENTS = [
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36",
+]
+
 PHONE_RE = re.compile(r"\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}")
-
-
-def _make_headers() -> dict:
-    headers = DEFAULT_HEADERS.copy()
-    headers["User-Agent"] = random.choice(USER_AGENTS)
-    return headers
 
 
 def _normalize_phone(number: str) -> str:
@@ -54,41 +46,55 @@ def _parse_phones(text: str) -> List[str]:
     return list(phones)
 
 
-def _fetch(url: str, debug: bool = False, retries: int = 3) -> requests.Response:
-    """Fetch a URL with basic 403 retry handling and rotating user-agent."""
-    for attempt in range(1, retries + 1):
-        headers = _make_headers()
-        resp = requests.get(url, headers=headers, timeout=15)
-        if resp.status_code != 403:
-            break
-        if attempt < retries:
-            print("Blocked — retrying with new headers")
-            time.sleep(random.uniform(0.5, 1.5))
-    if debug:
-        os.makedirs("logs", exist_ok=True)
-        with open("logs/debug_last.html", "w", encoding="utf-8") as f:
-            f.write(resp.text)
-    resp.raise_for_status()
-    return resp
+def _ensure_logs():
+    os.makedirs("logs", exist_ok=True)
+
+
+def _fetch_html(url: str, debug: bool = False, retries: int = 3) -> str:
+    """Fetches the given URL using Playwright and returns HTML."""
+    last_html = ""
+    for attempt in range(retries):
+        ua = random.choice(USER_AGENTS)
+        if debug:
+            print(f"Fetching {url} (attempt {attempt + 1})")
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(user_agent=ua, extra_http_headers=HEADERS)
+            page = context.new_page()
+            try:
+                response = page.goto(url, wait_until="domcontentloaded", timeout=15000)
+                status = response.status if response else None
+                last_html = page.content()
+                if status == 403:
+                    if debug:
+                        print("Blocked — retrying with new headers")
+                    browser.close()
+                    continue
+                return last_html
+            except Exception as exc:
+                if debug:
+                    print(f"Error: {exc}")
+            finally:
+                browser.close()
+    if debug and last_html:
+        _ensure_logs()
+        with open("logs/debug_last.html", "w", encoding="utf-8") as fh:
+            fh.write(last_html)
+    return last_html
 
 
 def search_truepeoplesearch(address: str, debug: bool = False) -> List[Dict[str, object]]:
     """Searches TruePeopleSearch for the given address."""
     if debug:
         print("Trying TruePeopleSearch...")
-
-    url = (
-        "https://www.truepeoplesearch.com/results?" +
-        f"streetaddress={quote_plus(address)}"
-    )
-    resp = _fetch(url, debug)
-    soup = BeautifulSoup(resp.text, "html.parser")
-    cards = soup.select("div.card")
-    if not cards:
-        cards = soup.select("li.card")
+    url = "https://www.truepeoplesearch.com/results?" + f"streetaddress={quote_plus(address)}"
+    html = _fetch_html(url, debug=debug)
+    if not html:
+        return []
+    soup = BeautifulSoup(html, "html.parser")
+    cards = soup.select("div.card") or soup.select("div.result")
     if debug:
         print(f"Found {len(cards)} cards...")
-
     results = []
     for card in cards:
         name_el = card.find("a", href=re.compile("/details"))
@@ -99,8 +105,6 @@ def search_truepeoplesearch(address: str, debug: bool = False) -> List[Dict[str,
         location = location_el.get_text(strip=True) if location_el else ""
         phone_text = card.get_text(" ")
         phones = _parse_phones(phone_text)
-        if debug:
-            print("Parsing result...")
         if name or phones:
             results.append({
                 "name": name,
@@ -108,6 +112,10 @@ def search_truepeoplesearch(address: str, debug: bool = False) -> List[Dict[str,
                 "city_state": location,
                 "source": "TruePeopleSearch",
             })
+    if debug:
+        print("Parsing result...")
+    if debug and not results:
+        print("No matches found.")
     return results
 
 
@@ -115,17 +123,15 @@ def search_fastpeoplesearch(address: str, debug: bool = False) -> List[Dict[str,
     """Searches FastPeopleSearch for the given address."""
     if debug:
         print("Trying FastPeopleSearch...")
-
     slug = quote_plus(address.lower().replace(",", "").replace(" ", "-"))
     url = f"https://www.fastpeoplesearch.com/address/{slug}"
-    resp = _fetch(url, debug)
-    soup = BeautifulSoup(resp.text, "html.parser")
-    cards = soup.select("div.card")
-    if not cards:
-        cards = soup.select("li.card")
+    html = _fetch_html(url, debug=debug)
+    if not html:
+        return []
+    soup = BeautifulSoup(html, "html.parser")
+    cards = soup.select("div.card") or soup.select("div.result")
     if debug:
         print(f"Found {len(cards)} cards...")
-
     results = []
     for card in cards:
         name_el = card.find("a", href=re.compile("/person"))
@@ -136,8 +142,6 @@ def search_fastpeoplesearch(address: str, debug: bool = False) -> List[Dict[str,
         location = location_el.get_text(strip=True) if location_el else ""
         phone_text = card.get_text(" ")
         phones = _parse_phones(phone_text)
-        if debug:
-            print("Parsing result...")
         if name or phones:
             results.append({
                 "name": name,
@@ -145,26 +149,30 @@ def search_fastpeoplesearch(address: str, debug: bool = False) -> List[Dict[str,
                 "city_state": location,
                 "source": "FastPeopleSearch",
             })
+    if debug:
+        print("Parsing result...")
+    if debug and not results:
+        print("No matches found.")
     return results
 
 
 def skip_trace(address: str, debug: bool = False) -> List[Dict[str, object]]:
     """Returns matches for the given property address."""
     try:
-        results = search_truepeoplesearch(address, debug)
+        results = search_truepeoplesearch(address, debug=debug)
         if results:
             return results
-    except Exception:
+    except Exception as exc:
         if debug:
-            print("TruePeopleSearch lookup failed")
+            print(f"TruePeopleSearch error: {exc}")
 
     try:
-        results = search_fastpeoplesearch(address, debug)
+        results = search_fastpeoplesearch(address, debug=debug)
         if results:
             return results
-    except Exception:
+    except Exception as exc:
         if debug:
-            print("FastPeopleSearch lookup failed")
+            print(f"FastPeopleSearch error: {exc}")
 
     return []
 
@@ -174,11 +182,11 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Simple skip tracer")
     parser.add_argument("address", nargs="+", help="Full property address")
-    parser.add_argument("--debug", action="store_true", help="Save and print debug output")
+    parser.add_argument("--debug", action="store_true", help="Enable debug output")
     args = parser.parse_args()
 
     address_input = " ".join(args.address)
-    matches = skip_trace(address_input, args.debug)
+    matches = skip_trace(address_input, debug=args.debug)
     if not matches:
         print("No matches found for this address.")
     else:
