@@ -211,23 +211,6 @@ if "press & hold" in lower_html:
         html = page.content()
         lower_html = html.lower()
 
-    bot_check = False
-    if (
-        "are you a human" in lower_html
-        or "robot check" in lower_html
-
-        or "press & hold" in lower_html
-        or ("verify" in lower_html and "robot" in lower_html)
-    ):
-        bot_check = True
-    else:
-        try:
-            if page.locator("text=verify", has_text="robot").first.is_visible(timeout=1000):
-                bot_check = True
-        except Exception:
-            pass
-
-lower_html = html.lower()
 bot_check = False
 if (
     "are you a human" in lower_html
