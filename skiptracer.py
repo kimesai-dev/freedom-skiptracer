@@ -1,6 +1,5 @@
 import argparse
 import json
-import os
 import random
 import re
 import time
@@ -61,50 +60,6 @@ def random_mouse_movement(page, width: int = 1366, height: int = 768) -> None:
         page.mouse.move(x, y, steps=random.randint(5, 15))
         time.sleep(random.uniform(0.05, 0.2))
 
-def handle_press_and_hold(page, debug: bool) -> bool:
-    try:
-        button = page.locator("text=Press & Hold").first
-        button.wait_for(timeout=7000)
-        box = button.bounding_box()
-        if box:
-            page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2, steps=15)
-        page.mouse.down()
-        time.sleep(random.uniform(5.5, 7.5))
-        page.mouse.up()
-        page.wait_for_load_state("networkidle", timeout=15000)
-        if debug:
-            save_debug_html(page.content(), name="after_press_hold.html")
-        return True
-    except Exception as e:
-        if debug:
-            print(f"Failed to complete press-and-hold: {e}")
-        return False
-
-def fetch_html(context, url: str, debug: bool) -> str:
-    page = context.new_page()
-    apply_stealth(page)
-    random_mouse_movement(page)
-    response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
-    for _ in range(random.randint(1, 2)):
-        page.mouse.wheel(0, random.randint(200, 800))
-        time.sleep(random.uniform(0.2, 0.5))
-
-    time.sleep(random.uniform(0.3, 0.7))
-    html = page.content()
-    if debug:
-        save_debug_html(html)
-    if response and response.status >= 400:
-        raise ValueError(f"HTTP {response.status}")
-    page.close()
-    return html
-
-    times = times or random.randint(3, 7)
-    box = page.viewport_size or {"width": 1366, "height": 768}
-    for _ in range(times):
-        x = random.randint(0, box["width"] - 1)
-        y = random.randint(0, box["height"] - 1)
-        page.mouse.move(x, y, steps=random.randint(5, 20))
-        page.wait_for_timeout(random.randint(50, 150))
 
 def handle_press_and_hold(page, debug: bool) -> None:
     """Attempt to solve the press and hold challenge if displayed."""
@@ -186,39 +141,33 @@ def search_truepeoplesearch(
         if debug:
             print("Failed to click Address tab")
 
-    street = address
-    city_state = ""
-    if "," in address:
-        street, city_state = [part.strip() for part in address.split(",", 1)]
-
     try:
         street, cityzip = [part.strip() for part in address.split(",", 1)]
     except ValueError:
         street, cityzip = address.strip(), ""
 
-       try:
-    address_input = page.locator("input[placeholder*='Enter name']").first
-    city_input = page.locator("input[placeholder*='City']").first
-    address_input.wait_for(timeout=5000)
-    city_input.wait_for(timeout=5000)
+    try:
+        address_input = page.locator("input[placeholder*='Enter name']").first
+        city_input = page.locator("input[placeholder*='City']").first
+        address_input.wait_for(timeout=5000)
+        city_input.wait_for(timeout=5000)
 
-    address_input.fill(street.strip())
-    if cityzip:
-        city_input.fill(cityzip.strip())
-    else:
-        city_input.fill("")
-except Exception:
-    if debug:
-        print("Failed to locate or type into address fields")
-    html = page.content()
-    if debug:
-        save_debug_html(html)
-    page.close()
-    return []
+        address_input.fill(street.strip())
+        if cityzip:
+            city_input.fill(cityzip.strip())
+        else:
+            city_input.fill("")
+    except Exception:
+        if debug:
+            print("Failed to locate or type into address fields")
+        html = page.content()
+        if debug:
+            save_debug_html(html)
+        page.close()
+        return []
 
     try:
-city_input.press("Enter")
-
+        city_input.press("Enter")
         time.sleep(3)
     except Exception:
         try:
@@ -245,21 +194,20 @@ city_input.press("Enter")
 
     lower_html = html.lower()
 
-if "press & hold" in lower_html:
-    print("Press & Hold challenge detected")
-    if manual and visible:
-        page.pause()
-    else:
-        handle_press_and_hold(page, debug)
-        page.wait_for_load_state("domcontentloaded")
-        html = page.content()
-        lower_html = html.lower()
+    if "press & hold" in lower_html:
+        print("Press & Hold challenge detected")
+        if manual and visible:
+            page.pause()
+        else:
+            handle_press_and_hold(page, debug)
+            page.wait_for_load_state("domcontentloaded")
+            html = page.content()
+            lower_html = html.lower()
 
     bot_check = False
     if (
         "are you a human" in lower_html
         or "robot check" in lower_html
-
         or "press & hold" in lower_html
         or ("verify" in lower_html and "robot" in lower_html)
     ):
@@ -270,16 +218,6 @@ if "press & hold" in lower_html:
                 bot_check = True
         except Exception:
             pass
-
-lower_html = html.lower()
-bot_check = False
-if (
-    "are you a human" in lower_html
-    or "robot check" in lower_html
-    or "press & hold" in lower_html
-    or ("verify" in lower_html and "robot" in lower_html)
-):
-    bot_check = True
 
     if bot_check:
         print("Bot check detected — waiting 10s and retrying...")
@@ -429,18 +367,11 @@ def main() -> None:
                     args.inspect,
                     args.visible,
                     args.manual,
-
                 )
             )
         except Exception as exc:
             if args.debug:
                 print(f"TruePeopleSearch failed: {exc}")
-        results: List[Dict[str, object]] = []
-        try:
-            results.extend(search_truepeoplesearch(context, args.address, args.debug, args.inspect))
-        except Exception as e:
-            if args.debug:
-                print(f"TruePeopleSearch failed: {e}")
 
         if args.fast:
             try:
