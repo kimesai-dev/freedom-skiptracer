@@ -53,6 +53,7 @@ USER_AGENTS = [
 # Each entry should be in the form 'http://user:pass@host:port'
 PROXIES = [
     "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10001",
+
     # Additional proxies can be added here for rotation
 ]
 
