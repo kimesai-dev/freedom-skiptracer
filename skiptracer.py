@@ -1,11 +1,29 @@
 import argparse
 import json
+import logging
 import random
 import re
 import time
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional
 from urllib.parse import quote_plus
+
+import numpy as np
+
+from human_behavior_ml import (
+    load_behavior_model,
+    predict_hold_duration,
+)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+# Preload ML model used for generating human-like timings. The helper functions
+# handle the case where the model file does not exist and return ``None``.
+BEHAVIOR_MODEL = load_behavior_model("models/behavior_model.zip")
 
 try:
     from bs4 import BeautifulSoup
@@ -40,8 +58,11 @@ def save_debug_html(html: str, name: str = "debug_last.html") -> None:
     Path(f"logs/{name}").write_text(html)
 
 def apply_stealth(page) -> None:
+    """Spoof common fingerprint attributes using randomized values."""
+
     hw_concurrency = random.randint(4, 8)
     dev_mem = random.choice([4, 8])
+
     page.add_init_script(
         f"""
         Object.defineProperty(navigator, 'webdriver', {{get: () => undefined}});
@@ -53,11 +74,48 @@ def apply_stealth(page) -> None:
         """
     )
 
+def _cubic_bezier(p0: float, p1: float, p2: float, p3: float, t: float) -> float:
+    """Return a single dimension of a cubic Bezier curve."""
+    return (
+        (1 - t) ** 3 * p0
+        + 3 * (1 - t) ** 2 * t * p1
+        + 3 * (1 - t) * t ** 2 * p2
+        + t ** 3 * p3
+    )
+
+
+def smooth_mouse_move(
+    page,
+    start_x: float,
+    start_y: float,
+    end_x: float,
+    end_y: float,
+    duration: float = 1.0,
+    steps: int = 20,
+) -> None:
+    """Move the mouse along a randomized Bezier path."""
+
+    # Random control points generate curved paths with subtle variation
+    cp1_x = start_x + random.uniform(-100, 100)
+    cp1_y = start_y + random.uniform(-100, 100)
+    cp2_x = end_x + random.uniform(-100, 100)
+    cp2_y = end_y + random.uniform(-100, 100)
+
+    for i, t in enumerate(np.linspace(0, 1, steps)):
+        x = _cubic_bezier(start_x, cp1_x, cp2_x, end_x, t)
+        y = _cubic_bezier(start_y, cp1_y, cp2_y, end_y, t)
+        page.mouse.move(x, y)
+        # Introduce slight per-step delays to mimic natural movement
+        time.sleep(max(0.001, duration / steps) * random.uniform(0.7, 1.3))
+        logger.debug(f"Bezier move {i}/{steps}: {x:.1f},{y:.1f}")
+
+
 def random_mouse_movement(page, width: int = 1366, height: int = 768) -> None:
+    """Perform several smooth mouse moves around the page."""
     for _ in range(random.randint(5, 10)):
         x = random.randint(0, width)
         y = random.randint(0, height)
-        page.mouse.move(x, y, steps=random.randint(5, 15))
+        smooth_mouse_move(page, page.mouse.position[0], page.mouse.position[1], x, y)
         time.sleep(random.uniform(0.05, 0.2))
 
 
@@ -69,9 +127,20 @@ def handle_press_and_hold(page, debug: bool) -> None:
         btn.wait_for(timeout=3000)
         box = btn.bounding_box()
         if box:
-            page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+            target_x = box["x"] + box["width"] / 2
+            target_y = box["y"] + box["height"] / 2
+            smooth_mouse_move(page, page.mouse.position[0], page.mouse.position[1], target_x, target_y, duration=0.5)
             page.mouse.down()
-            page.wait_for_timeout(random.randint(7000, 10000))
+
+            # Determine hold duration via ML model if available; otherwise use a
+            # randomized 3-6 second range.  This adds subtle variation between
+            # sessions to better mimic genuine user behavior.
+            hold = random.uniform(3, 6)
+            if BEHAVIOR_MODEL:
+                hold = predict_hold_duration(BEHAVIOR_MODEL, hold)
+            logger.debug(f"Holding press for {hold:.2f}s")
+            page.wait_for_timeout(int(hold * 1000))
+
             page.mouse.up()
             page.wait_for_load_state("domcontentloaded")
             if debug:
@@ -81,12 +150,32 @@ def handle_press_and_hold(page, debug: bool) -> None:
         if debug:
             print(f"Failed to handle press-and-hold: {exc}")
 
+
+def setup_telemetry_logging(page) -> None:
+    """Attach listeners to log network telemetry for debugging/replay."""
+
+    def log_request(request) -> None:
+        logger.debug(
+            "REQ %s %s payload=%s",
+            request.method,
+            request.url,
+            request.post_data,
+        )
+
+    def log_response(response) -> None:
+        logger.debug("RES %s %s", response.status, response.url)
+
+    page.on("request", log_request)
+    page.on("response", log_response)
+
 def create_context(p, visible: bool, proxy: str | None) -> tuple:
     """Launch a browser with randomized context settings."""
 
     launch_args = {"headless": not visible}
     if proxy:
+        # Proxies can be rotated/residential to reduce IP bans.
         launch_args["proxy"] = {"server": proxy}
+        logger.info(f"Using proxy {proxy}")
     browser = p.chromium.launch(**launch_args)
     width = random.randint(1280, 1920)
     height = random.randint(720, 1080)
@@ -101,8 +190,10 @@ def create_context(p, visible: bool, proxy: str | None) -> tuple:
 def fetch_html(context, url: str, debug: bool) -> str:
     """Navigate to a URL in a fresh page and return the HTML."""
     page = context.new_page()
+    setup_telemetry_logging(page)
     apply_stealth(page)
     random_mouse_movement(page)
+    logger.info(f"Fetching {url}")
     response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
     for _ in range(random.randint(1, 2)):
         page.mouse.wheel(0, random.randint(200, 800))
@@ -111,6 +202,7 @@ def fetch_html(context, url: str, debug: bool) -> str:
     html = page.content()
     if debug:
         save_debug_html(html)
+        logger.debug(f"Saved debug HTML for {url}")
     if response and response.status >= 400:
         raise ValueError(f"HTTP {response.status}")
     page.close()
@@ -130,6 +222,7 @@ def search_truepeoplesearch(
         print("Trying TruePeopleSearch...")
 
     page = context.new_page()
+    setup_telemetry_logging(page)
     apply_stealth(page)
     random_mouse_movement(page)
     page.goto("https://www.truepeoplesearch.com/", wait_until="domcontentloaded", timeout=30000)
@@ -285,6 +378,7 @@ def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -
     url = f"https://www.fastpeoplesearch.com/address/{slug}"
 
     page = context.new_page()
+    setup_telemetry_logging(page)
     apply_stealth(page)
     page.goto(url, wait_until="domcontentloaded", timeout=30000)
     time.sleep(3)
@@ -354,6 +448,10 @@ def main() -> None:
 
     parser.add_argument("--save", action="store_true", help="Write results to results.json")
     args = parser.parse_args()
+
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
+        logger.debug("Debug logging enabled")
 
     with sync_playwright() as p:
         browser, context = create_context(p, args.visible, args.proxy)
