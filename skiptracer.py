@@ -219,6 +219,7 @@ def search_truepeoplesearch(
         except Exception:
             pass
 
+
     if bot_check:
         print("Bot check detected — waiting 10s and retrying...")
         if debug:
@@ -359,8 +360,7 @@ def main() -> None:
 
         results: List[Dict[str, object]] = []
         try:
-            results.extend(
-                search_truepeoplesearch(
+            results.extend(search_truepeoplesearch(
                     context,
                     args.address,
                     args.debug,
@@ -369,6 +369,7 @@ def main() -> None:
                     args.manual,
                 )
             )
+
         except Exception as exc:
             if args.debug:
                 print(f"TruePeopleSearch failed: {exc}")
