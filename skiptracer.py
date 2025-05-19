@@ -196,24 +196,25 @@ def search_truepeoplesearch(
     except ValueError:
         street, cityzip = address.strip(), ""
 
-        address_input = page.locator("input[placeholder*='Enter name']").first
-        city_input = page.locator("input[placeholder*='City']").first
-        address_input.wait_for(timeout=5000)
-        city_input.wait_for(timeout=5000)
-address_input.fill(street.strip())
-if cityzip:
-    city_input.fill(cityzip.strip())
-else:
-    city_input.fill("")
+       try:
+    address_input = page.locator("input[placeholder*='Enter name']").first
+    city_input = page.locator("input[placeholder*='City']").first
+    address_input.wait_for(timeout=5000)
+    city_input.wait_for(timeout=5000)
 
-    except Exception:
-        if debug:
-            print("Failed to locate or type into address fields")
-        html = page.content()
-        if debug:
-            save_debug_html(html)
-        page.close()
-        return []
+    address_input.fill(street.strip())
+    if cityzip:
+        city_input.fill(cityzip.strip())
+    else:
+        city_input.fill("")
+except Exception:
+    if debug:
+        print("Failed to locate or type into address fields")
+    html = page.content()
+    if debug:
+        save_debug_html(html)
+    page.close()
+    return []
 
     try:
 city_input.press("Enter")
