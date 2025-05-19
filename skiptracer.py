@@ -192,10 +192,9 @@ def search_truepeoplesearch(
         street, city_state = [part.strip() for part in address.split(",", 1)]
 
     try:
-    try:
-    street, cityzip = [part.strip() for part in address.split(",", 1)]
-except ValueError:
-    street, cityzip = address.strip(), ""
+        street, cityzip = [part.strip() for part in address.split(",", 1)]
+    except ValueError:
+        street, cityzip = address.strip(), ""
 
         address_input = page.locator("input[placeholder*='Enter name']").first
         city_input = page.locator("input[placeholder*='City']").first
