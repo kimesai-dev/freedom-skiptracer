@@ -122,6 +122,7 @@ def random_mouse_movement(page, width: int = 1366, height: int = 768) -> None:
         y = random.randint(0, height)
         smooth_mouse_move(page, start_x, start_y, x, y)
         start_x, start_y = x, y
+
         time.sleep(random.uniform(0.05, 0.2))
 
 
@@ -136,6 +137,7 @@ def handle_press_and_hold(page, debug: bool) -> None:
             target_x = box["x"] + box["width"] / 2
             target_y = box["y"] + box["height"] / 2
             smooth_mouse_move(page, CURRENT_MOUSE_POS[0], CURRENT_MOUSE_POS[1], target_x, target_y, duration=0.5)
+
             page.mouse.down()
 
             # Determine hold duration via ML model if available; otherwise use a
