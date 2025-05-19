@@ -141,39 +141,33 @@ def search_truepeoplesearch(
         if debug:
             print("Failed to click Address tab")
 
-    street = address
-    city_state = ""
-    if "," in address:
-        street, city_state = [part.strip() for part in address.split(",", 1)]
-
     try:
         street, cityzip = [part.strip() for part in address.split(",", 1)]
     except ValueError:
         street, cityzip = address.strip(), ""
 
-       try:
-    address_input = page.locator("input[placeholder*='Enter name']").first
-    city_input = page.locator("input[placeholder*='City']").first
-    address_input.wait_for(timeout=5000)
-    city_input.wait_for(timeout=5000)
+    try:
+        address_input = page.locator("input[placeholder*='Enter name']").first
+        city_input = page.locator("input[placeholder*='City']").first
+        address_input.wait_for(timeout=5000)
+        city_input.wait_for(timeout=5000)
 
-    address_input.fill(street.strip())
-    if cityzip:
-        city_input.fill(cityzip.strip())
-    else:
-        city_input.fill("")
-except Exception:
-    if debug:
-        print("Failed to locate or type into address fields")
-    html = page.content()
-    if debug:
-        save_debug_html(html)
-    page.close()
-    return []
+        address_input.fill(street.strip())
+        if cityzip:
+            city_input.fill(cityzip.strip())
+        else:
+            city_input.fill("")
+    except Exception:
+        if debug:
+            print("Failed to locate or type into address fields")
+        html = page.content()
+        if debug:
+            save_debug_html(html)
+        page.close()
+        return []
 
     try:
-city_input.press("Enter")
-
+        city_input.press("Enter")
         time.sleep(3)
     except Exception:
         try:
@@ -200,24 +194,31 @@ city_input.press("Enter")
 
     lower_html = html.lower()
 
-if "press & hold" in lower_html:
-    print("Press & Hold challenge detected")
-    if manual and visible:
-        page.pause()
-    else:
-        handle_press_and_hold(page, debug)
-        page.wait_for_load_state("domcontentloaded")
-        html = page.content()
-        lower_html = html.lower()
+    if "press & hold" in lower_html:
+        print("Press & Hold challenge detected")
+        if manual and visible:
+            page.pause()
+        else:
+            handle_press_and_hold(page, debug)
+            page.wait_for_load_state("domcontentloaded")
+            html = page.content()
+            lower_html = html.lower()
 
-bot_check = False
-if (
-    "are you a human" in lower_html
-    or "robot check" in lower_html
-    or "press & hold" in lower_html
-    or ("verify" in lower_html and "robot" in lower_html)
-):
-    bot_check = True
+    bot_check = False
+    if (
+        "are you a human" in lower_html
+        or "robot check" in lower_html
+        or "press & hold" in lower_html
+        or ("verify" in lower_html and "robot" in lower_html)
+    ):
+        bot_check = True
+    else:
+        try:
+            if page.locator("text=verify", has_text="robot").first.is_visible(timeout=1000):
+                bot_check = True
+        except Exception:
+            pass
+
 
     if bot_check:
         print("Bot check detected — waiting 10s and retrying...")
@@ -366,7 +367,9 @@ def main() -> None:
                     args.inspect,
                     args.visible,
                     args.manual,
-                ))
+                )
+            )
+
         except Exception as exc:
             if args.debug:
                 print(f"TruePeopleSearch failed: {exc}")
