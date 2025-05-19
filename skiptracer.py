@@ -192,7 +192,7 @@ def search_truepeoplesearch(
         street, city_state = [part.strip() for part in address.split(",", 1)]
 
     try:
-try:
+    try:
     street, cityzip = [part.strip() for part in address.split(",", 1)]
 except ValueError:
     street, cityzip = address.strip(), ""
