@@ -84,6 +84,9 @@ def _cubic_bezier(p0: float, p1: float, p2: float, p3: float, t: float) -> float
     )
 
 
+CURRENT_MOUSE_POS = [0.0, 0.0]
+
+
 def smooth_mouse_move(
     page,
     start_x: float,
@@ -108,14 +111,18 @@ def smooth_mouse_move(
         # Introduce slight per-step delays to mimic natural movement
         time.sleep(max(0.001, duration / steps) * random.uniform(0.7, 1.3))
         logger.debug(f"Bezier move {i}/{steps}: {x:.1f},{y:.1f}")
-
+    CURRENT_MOUSE_POS[0] = end_x
+    CURRENT_MOUSE_POS[1] = end_y
 
 def random_mouse_movement(page, width: int = 1366, height: int = 768) -> None:
     """Perform several smooth mouse moves around the page."""
+    start_x, start_y = CURRENT_MOUSE_POS
     for _ in range(random.randint(5, 10)):
         x = random.randint(0, width)
         y = random.randint(0, height)
-        smooth_mouse_move(page, page.mouse.position[0], page.mouse.position[1], x, y)
+        smooth_mouse_move(page, start_x, start_y, x, y)
+        start_x, start_y = x, y
+
         time.sleep(random.uniform(0.05, 0.2))
 
 
@@ -129,7 +136,8 @@ def handle_press_and_hold(page, debug: bool) -> None:
         if box:
             target_x = box["x"] + box["width"] / 2
             target_y = box["y"] + box["height"] / 2
-            smooth_mouse_move(page, page.mouse.position[0], page.mouse.position[1], target_x, target_y, duration=0.5)
+            smooth_mouse_move(page, CURRENT_MOUSE_POS[0], CURRENT_MOUSE_POS[1], target_x, target_y, duration=0.5)
+
             page.mouse.down()
 
             # Determine hold duration via ML model if available; otherwise use a
@@ -179,6 +187,8 @@ def create_context(p, visible: bool, proxy: str | None) -> tuple:
     browser = p.chromium.launch(**launch_args)
     width = random.randint(1280, 1920)
     height = random.randint(720, 1080)
+    CURRENT_MOUSE_POS[0] = width / 2
+    CURRENT_MOUSE_POS[1] = height / 2
     context = browser.new_context(
         user_agent=random.choice(USER_AGENTS),
         viewport={"width": width, "height": height},
