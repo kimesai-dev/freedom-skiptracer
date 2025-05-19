@@ -360,26 +360,17 @@ def main() -> None:
 
         results: List[Dict[str, object]] = []
         try:
-            results.extend(
-                search_truepeoplesearch(
+            results.extend(search_truepeoplesearch(
                     context,
                     args.address,
                     args.debug,
                     args.inspect,
                     args.visible,
                     args.manual,
-
-                )
-            )
+                ))
         except Exception as exc:
             if args.debug:
                 print(f"TruePeopleSearch failed: {exc}")
-        results: List[Dict[str, object]] = []
-        try:
-            results.extend(search_truepeoplesearch(context, args.address, args.debug, args.inspect))
-        except Exception as e:
-            if args.debug:
-                print(f"TruePeopleSearch failed: {e}")
 
         if args.fast:
             try:
