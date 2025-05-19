@@ -98,8 +98,6 @@ def fetch_html(context, url: str, debug: bool) -> str:
     page.close()
     return html
 
-def random_mouse_movement(page, times: int | None = None) -> None:
-    """Move the mouse around randomly to appear more human."""
     times = times or random.randint(3, 7)
     box = page.viewport_size or {"width": 1366, "height": 768}
     for _ in range(times):
@@ -108,9 +106,9 @@ def random_mouse_movement(page, times: int | None = None) -> None:
         page.mouse.move(x, y, steps=random.randint(5, 20))
         page.wait_for_timeout(random.randint(50, 150))
 
-
 def handle_press_and_hold(page, debug: bool) -> None:
-    """Attempt to solve press and hold challenge."""
+    """Attempt to solve the press and hold challenge if displayed."""
+
     try:
         btn = page.locator("text=Press & Hold").first
         btn.wait_for(timeout=3000)
@@ -118,15 +116,19 @@ def handle_press_and_hold(page, debug: bool) -> None:
         if box:
             page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
             page.mouse.down()
-            page.wait_for_timeout(random.randint(8000, 12000))
+            page.wait_for_timeout(random.randint(7000, 10000))
             page.mouse.up()
+            page.wait_for_load_state("domcontentloaded")
+            if debug:
+                save_debug_html(page.content())
+
     except Exception as exc:
         if debug:
             print(f"Failed to handle press-and-hold: {exc}")
 
-
 def create_context(p, visible: bool, proxy: str | None) -> tuple:
-    """Launch browser and create a randomized context."""
+    """Launch a browser with randomized context settings."""
+
     launch_args = {"headless": not visible}
     if proxy:
         launch_args["proxy"] = {"server": proxy}
@@ -140,6 +142,24 @@ def create_context(p, visible: bool, proxy: str | None) -> tuple:
         timezone_id="America/New_York",
     )
     return browser, context
+
+def fetch_html(context, url: str, debug: bool) -> str:
+    """Navigate to a URL in a fresh page and return the HTML."""
+    page = context.new_page()
+    apply_stealth(page)
+    random_mouse_movement(page)
+    response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    for _ in range(random.randint(1, 2)):
+        page.mouse.wheel(0, random.randint(200, 800))
+        time.sleep(random.uniform(0.2, 0.5))
+    time.sleep(random.uniform(0.3, 0.7))
+    html = page.content()
+    if debug:
+        save_debug_html(html)
+    if response and response.status >= 400:
+        raise ValueError(f"HTTP {response.status}")
+    page.close()
+    return html
 
 
 def search_truepeoplesearch(
@@ -172,23 +192,20 @@ def search_truepeoplesearch(
         street, city_state = [part.strip() for part in address.split(",", 1)]
 
     try:
-      
-     try:
-        street, cityzip = address.split(",", 1)
-    except ValueError:
-        street, cityzip = address, ""
-
-    try:
+try:
+    street, cityzip = [part.strip() for part in address.split(",", 1)]
+except ValueError:
+    street, cityzip = address.strip(), ""
 
         address_input = page.locator("input[placeholder*='Enter name']").first
         city_input = page.locator("input[placeholder*='City']").first
         address_input.wait_for(timeout=5000)
         city_input.wait_for(timeout=5000)
-        address_input.fill(street.strip())
-        if cityzip:
-            city_input.fill(cityzip.strip())
-        else:
-            city_input.fill("")
+address_input.fill(street.strip())
+if cityzip:
+    city_input.fill(cityzip.strip())
+else:
+    city_input.fill("")
 
     except Exception:
         if debug:
@@ -200,7 +217,7 @@ def search_truepeoplesearch(
         return []
 
     try:
-page.press("input[placeholder*='City']", "Enter")
+city_input.press("Enter")
 
         time.sleep(3)
     except Exception:
@@ -243,8 +260,6 @@ if "press & hold" in lower_html:
         "are you a human" in lower_html
         or "robot check" in lower_html
 
-
-
         or "press & hold" in lower_html
         or ("verify" in lower_html and "robot" in lower_html)
     ):
@@ -256,28 +271,25 @@ if "press & hold" in lower_html:
         except Exception:
             pass
 
-
-
-
-    if "press & hold" in lower_html and "confirm you are a human" in lower_html:
-        print("Press & Hold challenge detected — attempting to solve")
-        solved = handle_press_and_hold(page, debug)
-        html = page.content()
-        lower_html = html.lower()
-        if solved:
-            bot_check = False
+lower_html = html.lower()
+bot_check = False
+if (
+    "are you a human" in lower_html
+    or "robot check" in lower_html
+    or "press & hold" in lower_html
+    or ("verify" in lower_html and "robot" in lower_html)
+):
+    bot_check = True
 
     if bot_check:
         print("Bot check detected — waiting 10s and retrying...")
         if debug:
             save_debug_html(html)
-
-        page.pause()
+        if manual and visible:
+            page.pause()
         time.sleep(10)
         page.reload()
         page.wait_for_load_state("domcontentloaded")
-
-
         random_mouse_movement(page)
 
         html = page.content()
@@ -326,7 +338,6 @@ if "press & hold" in lower_html:
     page.close()
     return results
 
-
 def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -> List[Dict[str, object]]:
     if debug:
         print("Trying FastPeopleSearch...")
@@ -351,8 +362,10 @@ def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -
     cards = soup.select("div.card a[href*='/person']")
     if debug:
         print(f"Found {len(cards)} cards on FastPeopleSearch")
+
     if len(cards) == 0:
         print("No cards found — likely bot block or bad selector.")
+
     if inspect:
         for card in cards:
             print("FPS card:\n", card.get_text(" ", strip=True))
@@ -406,17 +419,22 @@ def main() -> None:
     with sync_playwright() as p:
         browser, context = create_context(p, args.visible, args.proxy)
 
-        results = []
+        results: List[Dict[str, object]] = []
         try:
             results.extend(
                 search_truepeoplesearch(
-                    context, args.address, args.debug, args.inspect, args.visible, args.manual
+                    context,
+                    args.address,
+                    args.debug,
+                    args.inspect,
+                    args.visible,
+                    args.manual,
+
                 )
             )
         except Exception as exc:
             if args.debug:
                 print(f"TruePeopleSearch failed: {exc}")
-
         results: List[Dict[str, object]] = []
         try:
             results.extend(search_truepeoplesearch(context, args.address, args.debug, args.inspect))
