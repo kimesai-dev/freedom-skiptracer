@@ -61,50 +61,6 @@ def random_mouse_movement(page, width: int = 1366, height: int = 768) -> None:
         page.mouse.move(x, y, steps=random.randint(5, 15))
         time.sleep(random.uniform(0.05, 0.2))
 
-def handle_press_and_hold(page, debug: bool) -> bool:
-    try:
-        button = page.locator("text=Press & Hold").first
-        button.wait_for(timeout=7000)
-        box = button.bounding_box()
-        if box:
-            page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2, steps=15)
-        page.mouse.down()
-        time.sleep(random.uniform(5.5, 7.5))
-        page.mouse.up()
-        page.wait_for_load_state("networkidle", timeout=15000)
-        if debug:
-            save_debug_html(page.content(), name="after_press_hold.html")
-        return True
-    except Exception as e:
-        if debug:
-            print(f"Failed to complete press-and-hold: {e}")
-        return False
-
-def fetch_html(context, url: str, debug: bool) -> str:
-    page = context.new_page()
-    apply_stealth(page)
-    random_mouse_movement(page)
-    response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
-    for _ in range(random.randint(1, 2)):
-        page.mouse.wheel(0, random.randint(200, 800))
-        time.sleep(random.uniform(0.2, 0.5))
-
-    time.sleep(random.uniform(0.3, 0.7))
-    html = page.content()
-    if debug:
-        save_debug_html(html)
-    if response and response.status >= 400:
-        raise ValueError(f"HTTP {response.status}")
-    page.close()
-    return html
-
-    times = times or random.randint(3, 7)
-    box = page.viewport_size or {"width": 1366, "height": 768}
-    for _ in range(times):
-        x = random.randint(0, box["width"] - 1)
-        y = random.randint(0, box["height"] - 1)
-        page.mouse.move(x, y, steps=random.randint(5, 20))
-        page.wait_for_timeout(random.randint(50, 150))
 
 def handle_press_and_hold(page, debug: bool) -> None:
     """Attempt to solve the press and hold challenge if displayed."""
