@@ -52,21 +52,23 @@ USER_AGENTS = [
 # List of residential proxies used for rotation to distribute requests.
 # Each entry should be in the form 'http://user:pass@host:port'
 PROXIES = [
+    # Default Decodo residential proxy
     "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10001",
+    # Additional proxies can be added here for rotation
 ]
 
 def _parse_proxy(url: str) -> Dict[str, str]:
-    """Return Playwright proxy settings from a full proxy URL."""
-    parts = re.match(r"^(https?)://([^:]+):([^@]+)@([^:]+):(\d+)$", url)
-    if not parts:
-        return {"server": url}
-    scheme, user, pwd, host, port = parts.groups()
-    return {
-        "server": f"{scheme}://{host}:{port}",
-        "username": user,
-        "password": pwd,
-    }
-
+    """Convert proxy URL into Playwright proxy configuration."""
+    match = re.match(r"https?://(?:(?P<user>[^:]+):(?P<pass>[^@]+)@)?(?P<host>[^:]+):(?P<port>\d+)", url)
+    if not match:
+        raise ValueError(f"Invalid proxy URL: {url}")
+    info = match.groupdict()
+    server = f"http://{info['host']}:{info['port']}"
+    config = {"server": server}
+    if info.get("user"):
+        config["username"] = info["user"]
+        config["password"] = info["pass"] or ""
+    return config
 
 def _normalize_phone(number: str) -> str:
     digits = re.sub(r"\D", "", number)
@@ -272,9 +274,11 @@ def create_context(p, visible: bool, proxy: str | None) -> tuple:
         # Randomly select a residential proxy for rotation
         proxy = random.choice(PROXIES)
     if proxy:
-        proxy_cfg = _parse_proxy(proxy)
-        launch_args["proxy"] = proxy_cfg
-        logger.info("Using proxy %s", proxy)
+        proxy_conf = _parse_proxy(proxy)
+        launch_args["proxy"] = proxy_conf
+        logger.info(
+            "Using proxy %s (user=%s)", proxy_conf["server"], proxy_conf.get("username")
+        )
 
     browser = p.chromium.launch(**launch_args)
 
@@ -285,17 +289,19 @@ def create_context(p, visible: bool, proxy: str | None) -> tuple:
     CURRENT_MOUSE_POS[0] = width / 2
     CURRENT_MOUSE_POS[1] = height / 2
     ua = random.choice(USER_AGENTS)
-    lang_header = random.choice(LANGUAGES)
-    tz = random.choice(TIMEZONES)
+    tz = random.choice([
+        "America/New_York",
+        "America/Chicago",
+        "America/Los_Angeles",
+    ])
+    lang = random.choice(["en-US,en;q=0.9", "en-GB,en;q=0.8"])
+    logger.debug(f"Context UA={ua}, TZ={tz}, Lang={lang}")
     context = browser.new_context(
         user_agent=ua,
         viewport={"width": width, "height": height},
-        locale=lang_header.split(",")[0],
+        locale=lang.split(",")[0],
         timezone_id=tz,
-        extra_http_headers={
-            "Accept-Language": lang_header,
-            "Referer": "https://www.google.com/",
-        },
+
     )
     logger.debug(f"Context UA={ua}, TZ={tz}, Lang={lang_header}")
     return browser, context
@@ -321,14 +327,12 @@ def fetch_html(context, url: str, debug: bool) -> str:
         save_debug_html(html)
         logger.debug(f"Saved debug HTML for {url}")
     if response and response.status >= 400:
-        screenshot_path = f"logs/access_denied_{int(time.time())}.png"
-        page.screenshot(path=screenshot_path)
-        logger.error(
-            "Access Denied %s %s -- screenshot saved to %s",
-            response.status,
-            url,
-            screenshot_path,
-        )
+        Path("logs").mkdir(exist_ok=True)
+        ts = int(time.time())
+        screenshot = f"logs/error_{ts}.png"
+        page.screenshot(path=screenshot)
+        logger.debug(f"Saved error screenshot {screenshot}")
+
         raise ValueError(f"HTTP {response.status}")
     page.close()
     return html
