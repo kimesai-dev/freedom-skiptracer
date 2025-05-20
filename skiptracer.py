@@ -6,7 +6,7 @@ import re
 import time
 from pathlib import Path
 from typing import List, Dict, Optional
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlsplit
 
 import numpy as np
 
@@ -52,11 +52,18 @@ USER_AGENTS = [
 # List of residential proxies used for rotation to distribute requests.
 # Each entry should be in the form 'http://user:pass@host:port'
 PROXIES = [
-    # Residential proxy from Decodo used for all browser sessions
     "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10001",
-
-    # Additional proxies can be added here for rotation
 ]
+
+# Parse a proxy URL into Playwright configuration
+def parse_proxy_url(proxy_url: str) -> dict:
+    parsed = urlsplit(proxy_url)
+    return {
+        "server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}",
+        "username": parsed.username,
+        "password": parsed.password,
+    }
+
 
 def _normalize_phone(number: str) -> str:
     digits = re.sub(r"\D", "", number)
@@ -262,9 +269,19 @@ def create_context(p, visible: bool, proxy: str | None) -> tuple:
         # Randomly select a residential proxy for rotation
         proxy = random.choice(PROXIES)
     if proxy:
-        launch_args["proxy"] = {"server": proxy}
-        logger.info(f"Using proxy {proxy}")
-    browser = p.chromium.launch(**launch_args)
+        proxy_conf = parse_proxy_url(proxy)
+        launch_args["proxy"] = proxy_conf
+        logger.info(f"Using proxy {proxy_conf['server']}")
+        logger.debug(f"Proxy configuration: {proxy_conf}")
+    else:
+        proxy_conf = None
+    try:
+        browser = p.chromium.launch(**launch_args)
+        logger.debug("Browser launched successfully")
+    except Exception as exc:
+        logger.error(f"Failed to launch browser with proxy {proxy}: {exc}")
+        raise
+
     width = random.randint(1280, 1920)
     height = random.randint(720, 1080)
     logger.debug(f"Browser viewport {width}x{height}")
