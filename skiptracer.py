@@ -52,6 +52,7 @@ USER_AGENTS = [
 # List of residential proxies used for rotation to distribute requests.
 # Each entry should be in the form 'http://user:pass@host:port'
 PROXIES = [
+    # Residential proxy from Decodo used for all browser sessions
     "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10001",
 
     # Additional proxies can be added here for rotation
