@@ -6,7 +6,7 @@ import re
 import time
 from pathlib import Path
 from typing import List, Dict, Optional
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlsplit
 
 import numpy as np
 
@@ -67,6 +67,7 @@ PROXIES = [
     # Decodo residential proxy
     "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10001",
 ]
+
 
 def _normalize_phone(number: str) -> str:
     digits = re.sub(r"\D", "", number)
@@ -275,6 +276,8 @@ def create_context(p, visible: bool, proxy: str | None) -> tuple:
         launch_args["proxy"] = {"server": proxy}
         logger.info(f"Using proxy {proxy}")
     browser = p.chromium.launch(**launch_args)
+
+
     width = random.randint(1280, 1920)
     height = random.randint(720, 1080)
     logger.debug(f"Browser viewport {width}x{height}")
@@ -513,6 +516,7 @@ def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -
     if resp and resp.status >= 400:
         logger.error("Access denied on FPS search: %s", resp.status)
         page.screenshot(path="logs/access_denied_fps.png")
+
     time.sleep(3)
     try:
         page.wait_for_selector("div.card", timeout=8000)
