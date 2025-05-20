@@ -43,10 +43,13 @@ except ImportError as exc:
 
 PHONE_RE = re.compile(r"\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}")
 
+# Expanded list of modern user agents for stronger UA rotation
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:118.0) Gecko/20100101 Firefox/118.0",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
 ]
 
 # Common timezones for fingerprint randomization
@@ -65,10 +68,13 @@ LANGUAGES = [
     "de-DE,de;q=0.8,en-US;q=0.5",
 ]
 
-# List of residential proxies used for rotation to distribute requests.
-# Each entry should be in the form 'http://user:pass@host:port'
-# Decodo residential proxy
-PROXIES = [
+# Scale factor that is increased when repeated blocks occur to add extra
+# randomness to timings and mouse movement.
+HUMANIZATION_SCALE = 1.0
+
+# Lists of Decodo proxies separated by type for smart rotation
+# Residential proxies are used by default
+RESIDENTIAL_PROXIES = [
     "http://Sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10001",
     "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10002",
     "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10003",
@@ -81,21 +87,78 @@ PROXIES = [
     "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10010",
 ]
 
+# Newly provided mobile proxies – used when residential pool is blocked
+MOBILE_PROXIES = [
+    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decodo.com:10001",
+    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decodo.com:10002",
+    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decodo.com:10003",
+    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decodo.com:10004",
+    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decodo.com:10005",
+    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decodo.com:10006",
+    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decodo.com:10007",
+    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decodo.com:10008",
+    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decodo.com:10009",
+    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decodo.com:10010",
+]
+
+# For backwards compatibility with earlier versions
+PROXIES = RESIDENTIAL_PROXIES
+
 
 class ProxyRotator:
-    """Rotate through a list of proxies sequentially."""
+    """Rotate residential proxies first, then mobile on repeated failures."""
 
-    def __init__(self, proxies: List[str]):
-        self.proxies = proxies
-        self.index = 0
+    def __init__(self, residential: List[str], mobile: List[str]):
+        self.residential = residential
+        self.mobile = mobile
+        self.res_index = 0
+        self.mob_index = 0
+        self.mode = "residential"
+        self.failures = 0
+        self.success = 0
+        self.last_mobile = 0.0
 
-    def next_proxy(self) -> Optional[str]:
-        if self.index >= len(self.proxies):
-            return None
-        proxy = self.proxies[self.index]
-        self.index += 1
-        logger.info("Switching to proxy %s", proxy)
-        return proxy
+    def _get_proxy(self, pool: List[str], idx: int) -> tuple[Optional[str], int]:
+        if not pool:
+            return None, idx
+        if idx >= len(pool):
+            idx = 0
+        proxy = pool[idx]
+        idx += 1
+        return proxy, idx
+
+    def next_proxy(self) -> tuple[Optional[str], str]:
+        if self.mode == "residential":
+            proxy, self.res_index = self._get_proxy(self.residential, self.res_index)
+            ptype = "residential"
+        else:
+            proxy, self.mob_index = self._get_proxy(self.mobile, self.mob_index)
+            ptype = "mobile"
+        if proxy:
+            logger.info("Switching to %s proxy %s", ptype, proxy)
+        else:
+            logger.warning("No %s proxies left to rotate", ptype)
+        return proxy, ptype
+
+    def record_failure(self, reason: str) -> None:
+        global HUMANIZATION_SCALE
+        self.failures += 1
+        HUMANIZATION_SCALE = min(2.0, HUMANIZATION_SCALE + 0.1)
+        logger.warning("Proxy failure (%s) count=%d scale=%.2f", reason, self.failures, HUMANIZATION_SCALE)
+        if self.mode == "residential" and self.failures >= 2:
+            logger.warning("Switching to mobile proxies due to repeated failures")
+            self.mode = "mobile"
+            self.last_mobile = time.time()
+            self.failures = 0
+
+    def record_success(self) -> None:
+        global HUMANIZATION_SCALE
+        self.success += 1
+        self.failures = 0
+        HUMANIZATION_SCALE = max(1.0, HUMANIZATION_SCALE - 0.05)
+        if self.mode == "mobile" and time.time() - self.last_mobile > 300:
+            logger.info("Returning to residential proxies after cooldown")
+            self.mode = "residential"
 
 def _parse_proxy(proxy: str) -> dict:
     """Return server/username/password dict for Playwright."""
@@ -137,6 +200,17 @@ def check_for_cloudflare(page, html: str, url: str) -> None:
         page.screenshot(path=screenshot)
         logger.warning("Cloudflare block detected at %s, screenshot %s", url, screenshot)
 
+def check_security_service(page, html: str, url: str) -> bool:
+    """Detect generic security service block pages."""
+    lower = html.lower()
+    if "security service" in lower and "protect itself" in lower:
+        Path("logs").mkdir(exist_ok=True)
+        screenshot = f"logs/security_service_{int(time.time())}.png"
+        page.screenshot(path=screenshot)
+        logger.warning("Security service block detected at %s, screenshot %s", url, screenshot)
+        return True
+    return False
+
 def reset_storage(context) -> None:
     """Clear cookies and storage to avoid reuse across sessions."""
     try:
@@ -160,6 +234,17 @@ def apply_stealth(page) -> None:
         Object.defineProperty(navigator, 'languages', {{ get: () => ['en-US', 'en'] }});
         Object.defineProperty(navigator, 'hardwareConcurrency', {{ get: () => {hw_concurrency} }});
         Object.defineProperty(navigator, 'deviceMemory', {{ get: () => {dev_mem} }});
+        Object.defineProperty(navigator, 'platform', {{ get: () => 'Win32' }});
+        const getParameter = WebGLRenderingContext.prototype.getParameter;
+        WebGLRenderingContext.prototype.getParameter = function(param) {{
+            if (param === 37445) return 'Intel Inc.';
+            if (param === 37446) return 'Intel Iris OpenGL Engine';
+            return getParameter.call(this, param);
+        }};
+        const toDataURL = HTMLCanvasElement.prototype.toDataURL;
+        HTMLCanvasElement.prototype.toDataURL = function() {{ return 'data:image/png;base64,AAAA'; }};
+        Object.defineProperty(navigator, 'vendor', {{ get: () => 'Google Inc.' }});
+        navigator.mediaDevices.getUserMedia = undefined;
         """
     )
     # Apply additional stealth modifications from playwright-stealth
@@ -244,7 +329,8 @@ def smooth_mouse_move_ml(
 def random_mouse_movement(page, width: int = 1366, height: int = 768) -> None:
     """Perform several smooth mouse moves around the page."""
     start_x, start_y = CURRENT_MOUSE_POS
-    for _ in range(random.randint(5, 10)):
+    move_count = int(random.randint(5, 10) * HUMANIZATION_SCALE)
+    for _ in range(move_count):
         x = random.randint(0, width)
         y = random.randint(0, height)
         # Randomly choose between RL-generated and Bezier paths for variation
@@ -254,7 +340,7 @@ def random_mouse_movement(page, width: int = 1366, height: int = 768) -> None:
             smooth_mouse_move(page, start_x, start_y, x, y)
         start_x, start_y = x, y
 
-        time.sleep(random.uniform(0.05, 0.2))
+        time.sleep(random.uniform(0.05, 0.2) * HUMANIZATION_SCALE)
 
 
 def handle_press_and_hold(page, debug: bool) -> None:
@@ -355,11 +441,15 @@ def create_context(p, visible: bool, proxy: str | None) -> tuple:
     ua = random.choice(USER_AGENTS)
     tz = random.choice(TIMEZONES)
     lang_header = random.choice(LANGUAGES)
+    lat = random.uniform(25.0, 49.0)
+    lon = random.uniform(-124.0, -66.0)
     context = browser.new_context(
         user_agent=ua,
         viewport={"width": width, "height": height},
         locale=lang_header.split(',')[0],
         timezone_id=tz,
+        geolocation={"longitude": lon, "latitude": lat},
+        permissions=["geolocation"],
         device_scale_factor=1,
         extra_http_headers={"Accept-Language": lang_header},
     )
@@ -384,7 +474,7 @@ def fetch_html(context, url: str, debug: bool) -> str:
     # Replay previously captured human telemetry to mimic authentic activity
     replay_telemetry(page, "telemetry.json")
     logger.info(f"Fetching {url}")
-    wait_pre = random.uniform(500, 1500)
+    wait_pre = random.uniform(500, 1500) * HUMANIZATION_SCALE
     logger.debug("Waiting %.0fms before navigation", wait_pre)
     page.wait_for_timeout(wait_pre)
     response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -392,8 +482,8 @@ def fetch_html(context, url: str, debug: bool) -> str:
         logger.debug(f"Navigation status {response.status} {response.url}")
     for _ in range(random.randint(1, 2)):
         page.mouse.wheel(0, random.randint(200, 800))
-        time.sleep(random.uniform(0.2, 0.5))
-    delay_after = random.uniform(800, 1500)
+        time.sleep(random.uniform(0.2, 0.5) * HUMANIZATION_SCALE)
+    delay_after = random.uniform(800, 1500) * HUMANIZATION_SCALE
     logger.debug("Waiting %.0fms after navigation", delay_after)
     page.wait_for_timeout(delay_after)
     html = page.content()
@@ -401,6 +491,9 @@ def fetch_html(context, url: str, debug: bool) -> str:
         save_debug_html(html)
         logger.debug(f"Saved debug HTML for {url}")
     check_for_cloudflare(page, html, url)
+    if check_security_service(page, html, url):
+        page.close()
+        raise RuntimeError("SECURITY_SERVICE")
     if response and response.status >= 400:
         Path("logs").mkdir(exist_ok=True)
         ts = int(time.time())
@@ -432,14 +525,14 @@ def search_truepeoplesearch(
     reset_storage(context)
 
     inter_url = "https://www.google.com/"
-    delay = random.uniform(800, 1500)
+    delay = random.uniform(800, 1500) * HUMANIZATION_SCALE
     logger.debug("Navigating to intermediate %s after %.0fms", inter_url, delay)
     page.wait_for_timeout(delay)
     try:
         page.goto(inter_url, timeout=15000)
     except Exception as exc:
         logger.debug("Intermediate navigation failed: %s", exc)
-    page.wait_for_timeout(random.uniform(1000, 2000))
+    page.wait_for_timeout(random.uniform(1000, 2000) * HUMANIZATION_SCALE)
 
     try:
         resp = page.goto(
@@ -459,7 +552,7 @@ def search_truepeoplesearch(
     if resp and resp.status >= 400:
         logger.error("Access denied on initial page: %s", resp.status)
         page.screenshot(path="logs/access_denied_start.png")
-    page.wait_for_timeout(random.uniform(800, 1500))
+    page.wait_for_timeout(random.uniform(800, 1500) * HUMANIZATION_SCALE)
     random_mouse_movement(page)
 
     try:
@@ -495,7 +588,7 @@ def search_truepeoplesearch(
 
     try:
         city_input.press("Enter")
-        time.sleep(3)
+        time.sleep(3 * HUMANIZATION_SCALE)
     except Exception:
         try:
             page.click("button[type='submit']")
@@ -505,13 +598,13 @@ def search_truepeoplesearch(
             page.close()
             return [], True
     page.wait_for_load_state("domcontentloaded")
-    time.sleep(3)
+    time.sleep(3 * HUMANIZATION_SCALE)
 
-    time.sleep(3)
+    time.sleep(3 * HUMANIZATION_SCALE)
     page.wait_for_load_state("domcontentloaded")
     for _ in range(random.randint(1, 3)):
         page.mouse.wheel(0, random.randint(200, 800))
-        time.sleep(random.uniform(0.3, 0.8))
+        time.sleep(random.uniform(0.3, 0.8) * HUMANIZATION_SCALE)
     random_mouse_movement(page)
 
     html = page.content()
@@ -519,6 +612,9 @@ def search_truepeoplesearch(
         Path("logs").mkdir(exist_ok=True)
         Path("logs/page_after_submit.html").write_text(html)
     check_for_cloudflare(page, html, "https://www.truepeoplesearch.com/")
+    if check_security_service(page, html, "https://www.truepeoplesearch.com/"):
+        page.close()
+        return [], True
 
     lower_html = html.lower()
 
@@ -581,6 +677,10 @@ def search_truepeoplesearch(
         detail_url = href if href.startswith("http") else f"https://www.truepeoplesearch.com{href}"
         try:
             detail_html = fetch_html(context, detail_url, debug)
+        except RuntimeError as e:
+            if debug:
+                print(f"Security block on detail page: {e}")
+            return results, True
         except Exception as e:
             if debug:
                 print(f"Error loading detail page: {e}")
@@ -618,15 +718,19 @@ def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -
     replay_telemetry(page, "telemetry.json")
     page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
-    time.sleep(3)
+    time.sleep(3 * HUMANIZATION_SCALE)
     try:
-        page.wait_for_selector("div.card", timeout=8000)
+        page.wait_for_selector("div.card", timeout=int(8000 * HUMANIZATION_SCALE))
     except Exception:
         pass
     page.mouse.wheel(0, random.randint(200, 800))
     html = page.content()
     if debug:
         save_debug_html(html)
+
+    if check_security_service(page, html, url):
+        page.close()
+        return [], True
 
     lower_html = html.lower()
     bot_check = False
@@ -658,6 +762,10 @@ def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -
         detail_url = href if href.startswith("http") else f"https://www.fastpeoplesearch.com{href}"
         try:
             detail_html = fetch_html(context, detail_url, debug)
+        except RuntimeError as e:
+            if debug:
+                print(f"Security block on FPS detail page: {e}")
+            return results, True
         except Exception as e:
             if debug:
                 print(f"Error loading detail page: {e}")
@@ -701,12 +809,12 @@ def main() -> None:
         logger.debug("Debug logging enabled")
 
     with sync_playwright() as p:
-        rotator = ProxyRotator([args.proxy] if args.proxy else PROXIES)
+        rotator = ProxyRotator([args.proxy] if args.proxy else RESIDENTIAL_PROXIES, MOBILE_PROXIES)
         results: List[Dict[str, object]] = []
         bot_block = True
 
         while bot_block:
-            proxy = rotator.next_proxy()
+            proxy, ptype = rotator.next_proxy()
             if proxy is None:
                 logger.error("All proxies exhausted without bypassing bot protection")
                 break
@@ -733,9 +841,14 @@ def main() -> None:
                     )
                     results.extend(res2)
                     bot_block = bot_block or bot2
+                if bot_block:
+                    rotator.record_failure("bot detection")
+                else:
+                    rotator.record_success()
 
             except Exception as exc:
                 bot_block = True
+                rotator.record_failure(str(exc))
                 if args.debug:
                     print(f"Search error: {exc}")
 
