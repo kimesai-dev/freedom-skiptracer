@@ -14,6 +14,8 @@ from human_behavior_ml import (
     load_behavior_model,
     predict_hold_duration,
 )
+from playwright_stealth import stealth_sync
+from stable_baselines3 import PPO
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,6 +26,12 @@ logger = logging.getLogger(__name__)
 # Preload ML model used for generating human-like timings. The helper functions
 # handle the case where the model file does not exist and return ``None``.
 BEHAVIOR_MODEL = load_behavior_model("models/behavior_model.zip")
+# Preload advanced RL model used to generate realistic mouse paths.
+try:
+    MOUSE_MODEL: Optional[PPO] = PPO.load("models/mouse_model.zip")
+except Exception:
+    MOUSE_MODEL = None
+    logger.debug("RL mouse model not loaded; falling back to bezier paths")
 
 try:
     from bs4 import BeautifulSoup
@@ -39,6 +47,25 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:118.0) Gecko/20100101 Firefox/118.0",
+]
+
+TIMEZONES = [
+    "America/New_York",
+    "America/Chicago",
+    "America/Denver",
+    "America/Los_Angeles",
+]
+
+LANGUAGES = [
+    "en-US,en;q=0.9",
+    "en-GB,en;q=0.9",
+]
+
+# List of residential proxies used for rotation to distribute requests.
+# Each entry should be in the form 'http://user:pass@host:port'
+PROXIES = [
+    # Decodo residential proxy
+    "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10001",
 ]
 
 def _normalize_phone(number: str) -> str:
@@ -73,6 +100,8 @@ def apply_stealth(page) -> None:
         Object.defineProperty(navigator, 'deviceMemory', {{ get: () => {dev_mem} }});
         """
     )
+    # Apply additional stealth modifications from playwright-stealth
+    stealth_sync(page)
 
 def _cubic_bezier(p0: float, p1: float, p2: float, p3: float, t: float) -> float:
     """Return a single dimension of a cubic Bezier curve."""
@@ -114,13 +143,53 @@ def smooth_mouse_move(
     CURRENT_MOUSE_POS[0] = end_x
     CURRENT_MOUSE_POS[1] = end_y
 
+def smooth_mouse_move_ml(
+    page,
+    start_x: float,
+    start_y: float,
+    end_x: float,
+    end_y: float,
+    duration: float = 1.0,
+) -> None:
+    """Move the mouse using a path predicted by the RL model."""
+    logger.debug(
+        "RL move from (%.1f, %.1f) to (%.1f, %.1f)", start_x, start_y, end_x, end_y
+    )
+    if not MOUSE_MODEL:
+        # Fallback to Bezier movement when model not available
+        smooth_mouse_move(page, start_x, start_y, end_x, end_y, duration)
+        return
+
+    # Predict a sequence of (dx, dy) offsets normalized to [-1,1] using the RL model
+    path = []
+    state = np.array([start_x, start_y, end_x, end_y], dtype=np.float32)
+    for _ in range(20):
+        action, _ = MOUSE_MODEL.predict(state, deterministic=True)
+        dx, dy = action
+        next_x = start_x + dx * (end_x - start_x)
+        next_y = start_y + dy * (end_y - start_y)
+        path.append((next_x, next_y))
+        logger.debug("RL predicted step to %.1f,%.1f", next_x, next_y)
+        state = np.array([next_x, next_y, end_x, end_y], dtype=np.float32)
+
+    for i, (x, y) in enumerate(path):
+        page.mouse.move(x, y)
+        time.sleep(max(0.001, duration / len(path)) * random.uniform(0.7, 1.3))
+        logger.debug(f"RL move {i}/{len(path)}: {x:.1f},{y:.1f}")
+    CURRENT_MOUSE_POS[0] = end_x
+    CURRENT_MOUSE_POS[1] = end_y
+
 def random_mouse_movement(page, width: int = 1366, height: int = 768) -> None:
     """Perform several smooth mouse moves around the page."""
     start_x, start_y = CURRENT_MOUSE_POS
     for _ in range(random.randint(5, 10)):
         x = random.randint(0, width)
         y = random.randint(0, height)
-        smooth_mouse_move(page, start_x, start_y, x, y)
+        # Randomly choose between RL-generated and Bezier paths for variation
+        if MOUSE_MODEL and random.random() < 0.6:
+            smooth_mouse_move_ml(page, start_x, start_y, x, y)
+        else:
+            smooth_mouse_move(page, start_x, start_y, x, y)
         start_x, start_y = x, y
 
         time.sleep(random.uniform(0.05, 0.2))
@@ -136,7 +205,8 @@ def handle_press_and_hold(page, debug: bool) -> None:
         if box:
             target_x = box["x"] + box["width"] / 2
             target_y = box["y"] + box["height"] / 2
-            smooth_mouse_move(page, CURRENT_MOUSE_POS[0], CURRENT_MOUSE_POS[1], target_x, target_y, duration=0.5)
+            # Use RL-based movement for high-value interaction
+            smooth_mouse_move_ml(page, CURRENT_MOUSE_POS[0], CURRENT_MOUSE_POS[1], target_x, target_y, duration=0.5)
 
             page.mouse.down()
 
@@ -176,25 +246,54 @@ def setup_telemetry_logging(page) -> None:
     page.on("request", log_request)
     page.on("response", log_response)
 
+def replay_telemetry(page, telemetry_file: str) -> None:
+    """Replay previously captured network events to mimic real behavior."""
+    if not Path(telemetry_file).exists():
+        logger.debug("Telemetry file %s not found", telemetry_file)
+        return
+    with open(telemetry_file, "r") as f:
+        events = json.load(f)
+    for evt in events:
+        method = evt.get("method")
+        url = evt.get("url")
+        payload = evt.get("payload")
+        if method and url:
+            logger.debug("Replaying %s %s", method, url)
+            try:
+                page.request.fetch(url, method=method, data=payload)
+            except Exception as exc:
+                logger.debug("Replay error %s", exc)
+
 def create_context(p, visible: bool, proxy: str | None) -> tuple:
     """Launch a browser with randomized context settings."""
 
     launch_args = {"headless": not visible}
+    if not proxy:
+        # Randomly select a residential proxy for rotation
+        proxy = random.choice(PROXIES)
     if proxy:
-        # Proxies can be rotated/residential to reduce IP bans.
         launch_args["proxy"] = {"server": proxy}
         logger.info(f"Using proxy {proxy}")
     browser = p.chromium.launch(**launch_args)
     width = random.randint(1280, 1920)
     height = random.randint(720, 1080)
+    logger.debug(f"Browser viewport {width}x{height}")
     CURRENT_MOUSE_POS[0] = width / 2
     CURRENT_MOUSE_POS[1] = height / 2
+    ua = random.choice(USER_AGENTS)
+    lang_header = random.choice(LANGUAGES)
+    tz = random.choice(TIMEZONES)
     context = browser.new_context(
-        user_agent=random.choice(USER_AGENTS),
+        user_agent=ua,
         viewport={"width": width, "height": height},
-        locale="en-US",
-        timezone_id="America/New_York",
+        locale=lang_header.split(",")[0],
+        timezone_id=tz,
+        extra_http_headers={
+            "Accept-Language": lang_header,
+            "Referer": "https://www.google.com/",
+        },
     )
+    logger.debug(f"Context UA={ua}, TZ={tz}, Lang={lang_header}")
     return browser, context
 
 def fetch_html(context, url: str, debug: bool) -> str:
@@ -203,8 +302,12 @@ def fetch_html(context, url: str, debug: bool) -> str:
     setup_telemetry_logging(page)
     apply_stealth(page)
     random_mouse_movement(page)
+    # Replay previously captured human telemetry to mimic authentic activity
+    replay_telemetry(page, "telemetry.json")
     logger.info(f"Fetching {url}")
     response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    if response:
+        logger.debug(f"Navigation status {response.status} {response.url}")
     for _ in range(random.randint(1, 2)):
         page.mouse.wheel(0, random.randint(200, 800))
         time.sleep(random.uniform(0.2, 0.5))
@@ -214,6 +317,14 @@ def fetch_html(context, url: str, debug: bool) -> str:
         save_debug_html(html)
         logger.debug(f"Saved debug HTML for {url}")
     if response and response.status >= 400:
+        screenshot_path = f"logs/access_denied_{int(time.time())}.png"
+        page.screenshot(path=screenshot_path)
+        logger.error(
+            "Access Denied %s %s -- screenshot saved to %s",
+            response.status,
+            url,
+            screenshot_path,
+        )
         raise ValueError(f"HTTP {response.status}")
     page.close()
     return html
@@ -235,7 +346,14 @@ def search_truepeoplesearch(
     setup_telemetry_logging(page)
     apply_stealth(page)
     random_mouse_movement(page)
-    page.goto("https://www.truepeoplesearch.com/", wait_until="domcontentloaded", timeout=30000)
+    resp = page.goto(
+        "https://www.truepeoplesearch.com/",
+        wait_until="domcontentloaded",
+        timeout=30000,
+    )
+    if resp and resp.status >= 400:
+        logger.error("Access denied on initial page: %s", resp.status)
+        page.screenshot(path="logs/access_denied_start.png")
     random_mouse_movement(page)
 
     try:
@@ -390,7 +508,11 @@ def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -
     page = context.new_page()
     setup_telemetry_logging(page)
     apply_stealth(page)
-    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    replay_telemetry(page, "telemetry.json")
+    resp = page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    if resp and resp.status >= 400:
+        logger.error("Access denied on FPS search: %s", resp.status)
+        page.screenshot(path="logs/access_denied_fps.png")
     time.sleep(3)
     try:
         page.wait_for_selector("div.card", timeout=8000)
