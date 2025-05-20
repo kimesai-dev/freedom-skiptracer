@@ -54,6 +54,7 @@ USER_AGENTS = [
 PROXIES = [
     # Residential proxy from Decodo used for all browser sessions
     "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10001",
+
     # Additional proxies can be added here for rotation
 ]
 
