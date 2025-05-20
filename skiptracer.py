@@ -1,6 +1,7 @@
 import argparse
 import json
 import logging
+import os
 import random
 import re
 import time
@@ -8,8 +9,10 @@ import threading
 from pathlib import Path
 from typing import List, Dict, Optional
 from urllib.parse import quote_plus, urlsplit
+import urllib.robotparser
 
 import numpy as np
+from dataclasses import dataclass, field
 
 from human_behavior_ml import (
     load_behavior_model,
@@ -137,9 +140,70 @@ INITIAL_MOBILE_RATIO = 0.3
 SESSION_COOKIES: dict[str, list] = {}
 SESSION_LOCK = threading.Lock()
 
-from dataclasses import dataclass, field
-import threading
+# Cache of parsed robots.txt files keyed by domain
+ROBOTS_CACHE: dict[str, urllib.robotparser.RobotFileParser] = {}
 
+
+class RateLimiter:
+    """Simple per-domain rate limiter."""
+
+    def __init__(self, delay: float = 5.0):
+        self.delay = delay
+        self.last: Dict[str, float] = {}
+
+    def wait(self, domain: str) -> None:
+        now = time.time()
+        last_time = self.last.get(domain, 0)
+        sleep_for = self.delay - (now - last_time)
+        if sleep_for > 0:
+            logger.debug("Rate limiting %s for %.2fs", domain, sleep_for)
+            time.sleep(sleep_for)
+        self.last[domain] = time.time()
+
+
+RATE_LIMITER = RateLimiter()
+
+
+def is_allowed_by_robots(url: str, ua: str) -> bool:
+    """Return True if the given URL is allowed by robots.txt."""
+    parsed = urlsplit(url)
+    base = f"{parsed.scheme}://{parsed.netloc}"
+    rp = ROBOTS_CACHE.get(base)
+    if not rp:
+        rp = urllib.robotparser.RobotFileParser()
+        try:
+            rp.set_url(f"{base}/robots.txt")
+            rp.read()
+        except Exception as exc:
+            logger.debug("robots.txt fetch failed for %s: %s", base, exc)
+            ROBOTS_CACHE[base] = rp
+            return True
+        ROBOTS_CACHE[base] = rp
+    return rp.can_fetch(ua, parsed.path)
+
+
+def load_cookie_store(path: str | None) -> None:
+    if not path or not Path(path).exists():
+        return
+    try:
+        data = json.loads(Path(path).read_text())
+        with SESSION_LOCK:
+            SESSION_COOKIES.update(data)
+        logger.debug("Loaded cookie store from %s", path)
+    except Exception as exc:
+        logger.debug("Cookie store load failed: %s", exc)
+
+
+def save_cookie_store(path: str | None) -> None:
+    if not path:
+        return
+    try:
+        with SESSION_LOCK:
+            data = SESSION_COOKIES
+        Path(path).write_text(json.dumps(data))
+        logger.debug("Saved cookie store to %s", path)
+    except Exception as exc:
+        logger.debug("Cookie store save failed: %s", exc)
 
 @dataclass
 class ProxyStats:
@@ -444,9 +508,32 @@ def detect_turnstile(page, html: str, url: str) -> bool:
         screenshot = f"logs/turnstile_{int(time.time())}.png"
         page.screenshot(path=screenshot)
         logger.warning("Turnstile CAPTCHA at %s screenshot %s", url, screenshot)
-        # Integration point for manual solve or CAPTCHA service
+        solve_turnstile_captcha(page)
         return True
     return False
+
+
+def handle_js_challenge(page, timeout: int = 15000) -> bool:
+    """Wait for Cloudflare JS challenge to complete."""
+    try:
+        locator = page.locator("text=Checking your browser before accessing")
+        if locator.first.is_visible(timeout=3000):
+            logger.info("Waiting for JS challenge to finish")
+            page.wait_for_load_state("networkidle", timeout=timeout)
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def solve_turnstile_captcha(page) -> None:
+    """Placeholder for CAPTCHA solving integration."""
+    api_key = os.getenv("CAPTCHA_API_KEY")
+    if not api_key:
+        logger.info("Manual CAPTCHA solve required")
+        return
+    logger.debug("Submitting CAPTCHA to external service")
+    # Actual CAPTCHA solving logic would go here
 
 
 def reset_storage(context) -> None:
@@ -502,6 +589,19 @@ def apply_stealth(page) -> None:
         Object.defineProperty(navigator, 'hardwareConcurrency', {{ get: () => {hw_concurrency} }});
         Object.defineProperty(navigator, 'deviceMemory', {{ get: () => {dev_mem} }});
         Object.defineProperty(navigator, 'platform', {{ get: () => '{platform}' }});
+
+        const originalQuery = navigator.permissions.query;
+        navigator.permissions.__proto__.query = parameters => (
+            parameters.name === 'notifications'
+                ? Promise.resolve({{ state: Notification.permission }})
+                : originalQuery.call(navigator.permissions, parameters)
+        );
+
+        Object.defineProperty(navigator, 'connection', {{ get: () => ({
+            rtt: Math.floor(Math.random() * 100) + 50,
+            downlink: (Math.random() * 10 + 1).toFixed(1),
+            effectiveType: '4g'
+        }) }});
 
         const getParameter = WebGLRenderingContext.prototype.getParameter;
         WebGLRenderingContext.prototype.getParameter = function(param) {{
@@ -750,6 +850,7 @@ def create_context(p, visible: bool, proxy: str | None) -> tuple:
         device_scale_factor=1,
         extra_http_headers={"Accept-Language": lang_header, "Referer": "https://www.google.com/"},
     )
+    context._user_agent = ua
     stealth_sync(context)
     reset_storage(context)
     intercept_beacon(context)
@@ -772,6 +873,12 @@ def fetch_html(context, url: str, debug: bool) -> str:
     restore_cookies(context, "www.truepeoplesearch.com")
     domain = urlsplit(url).netloc
     restore_cookies(context, domain)
+    ua = getattr(context, "_user_agent", random.choice(USER_AGENTS))
+    if not is_allowed_by_robots(url, ua):
+        logger.warning("Robots.txt disallows %s", url)
+        page.close()
+        raise RuntimeError("ROBOTS")
+    RATE_LIMITER.wait(domain)
     # Replay previously captured human telemetry to mimic authentic activity
     replay_telemetry(page, "telemetry.json")
     logger.info(f"Fetching {url}")
@@ -781,6 +888,7 @@ def fetch_html(context, url: str, debug: bool) -> str:
     response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
     if response:
         logger.debug(f"Navigation status {response.status} {response.url}")
+    handle_js_challenge(page)
     for _ in range(random.randint(1, 2)):
         page.mouse.wheel(0, random.randint(200, 1200))
         time.sleep(random.uniform(0.2, 0.5) * HUMANIZATION_SCALE)
@@ -1264,6 +1372,7 @@ def main() -> None:
     parser.add_argument("--proxy", help="Proxy server e.g. http://user:pass@host:port")
     parser.add_argument("--fast", action="store_true", help="Include FastPeopleSearch")
     parser.add_argument("--manual", action="store_true", help="Pause on bot wall for manual solve")
+    parser.add_argument("--cookie-store", help="Path to persistent cookie store JSON")
 
     parser.add_argument("--save", action="store_true", help="Write results to results.json")
     parser.add_argument(
@@ -1275,6 +1384,8 @@ def main() -> None:
         help="Number of parallel browser contexts to run (default: 5)",
     )
     args = parser.parse_args()
+
+    load_cookie_store(args.cookie_store)
 
     if args.debug:
         logger.setLevel(logging.DEBUG)
@@ -1289,6 +1400,8 @@ def main() -> None:
 
     if args.save:
         Path("results.json").write_text(json.dumps(results, indent=2))
+
+    save_cookie_store(args.cookie_store)
 
     if results:
         print(json.dumps(results, indent=2))
