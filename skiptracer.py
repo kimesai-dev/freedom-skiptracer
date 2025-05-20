@@ -49,24 +49,23 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:118.0) Gecko/20100101 Firefox/118.0",
 ]
 
-TIMEZONES = [
-    "America/New_York",
-    "America/Chicago",
-    "America/Denver",
-    "America/Los_Angeles",
-]
-
-LANGUAGES = [
-    "en-US,en;q=0.9",
-    "en-GB,en;q=0.9",
-]
-
 # List of residential proxies used for rotation to distribute requests.
 # Each entry should be in the form 'http://user:pass@host:port'
 PROXIES = [
-    # Decodo residential proxy
     "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10001",
 ]
+
+def _parse_proxy(url: str) -> Dict[str, str]:
+    """Return Playwright proxy settings from a full proxy URL."""
+    parts = re.match(r"^(https?)://([^:]+):([^@]+)@([^:]+):(\d+)$", url)
+    if not parts:
+        return {"server": url}
+    scheme, user, pwd, host, port = parts.groups()
+    return {
+        "server": f"{scheme}://{host}:{port}",
+        "username": user,
+        "password": pwd,
+    }
 
 
 def _normalize_phone(number: str) -> str:
@@ -273,8 +272,10 @@ def create_context(p, visible: bool, proxy: str | None) -> tuple:
         # Randomly select a residential proxy for rotation
         proxy = random.choice(PROXIES)
     if proxy:
-        launch_args["proxy"] = {"server": proxy}
-        logger.info(f"Using proxy {proxy}")
+        proxy_cfg = _parse_proxy(proxy)
+        launch_args["proxy"] = proxy_cfg
+        logger.info("Using proxy %s", proxy)
+
     browser = p.chromium.launch(**launch_args)
 
 
@@ -512,10 +513,7 @@ def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -
     setup_telemetry_logging(page)
     apply_stealth(page)
     replay_telemetry(page, "telemetry.json")
-    resp = page.goto(url, wait_until="domcontentloaded", timeout=30000)
-    if resp and resp.status >= 400:
-        logger.error("Access denied on FPS search: %s", resp.status)
-        page.screenshot(path="logs/access_denied_fps.png")
+    page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
     time.sleep(3)
     try:
