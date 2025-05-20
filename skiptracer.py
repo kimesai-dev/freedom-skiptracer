@@ -49,20 +49,24 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:118.0) Gecko/20100101 Firefox/118.0",
 ]
 
+TIMEZONES = [
+    "America/New_York",
+    "America/Chicago",
+    "America/Denver",
+    "America/Los_Angeles",
+]
+
+LANGUAGES = [
+    "en-US,en;q=0.9",
+    "en-GB,en;q=0.9",
+]
+
 # List of residential proxies used for rotation to distribute requests.
 # Each entry should be in the form 'http://user:pass@host:port'
 PROXIES = [
+    # Decodo residential proxy
     "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10001",
 ]
-
-# Parse a proxy URL into Playwright configuration
-def parse_proxy_url(proxy_url: str) -> dict:
-    parsed = urlsplit(proxy_url)
-    return {
-        "server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}",
-        "username": parsed.username,
-        "password": parsed.password,
-    }
 
 
 def _normalize_phone(number: str) -> str:
@@ -269,30 +273,30 @@ def create_context(p, visible: bool, proxy: str | None) -> tuple:
         # Randomly select a residential proxy for rotation
         proxy = random.choice(PROXIES)
     if proxy:
-        proxy_conf = parse_proxy_url(proxy)
-        launch_args["proxy"] = proxy_conf
-        logger.info(f"Using proxy {proxy_conf['server']}")
-        logger.debug(f"Proxy configuration: {proxy_conf}")
-    else:
-        proxy_conf = None
-    try:
-        browser = p.chromium.launch(**launch_args)
-        logger.debug("Browser launched successfully")
-    except Exception as exc:
-        logger.error(f"Failed to launch browser with proxy {proxy}: {exc}")
-        raise
+        launch_args["proxy"] = {"server": proxy}
+        logger.info(f"Using proxy {proxy}")
+    browser = p.chromium.launch(**launch_args)
+
 
     width = random.randint(1280, 1920)
     height = random.randint(720, 1080)
     logger.debug(f"Browser viewport {width}x{height}")
     CURRENT_MOUSE_POS[0] = width / 2
     CURRENT_MOUSE_POS[1] = height / 2
+    ua = random.choice(USER_AGENTS)
+    lang_header = random.choice(LANGUAGES)
+    tz = random.choice(TIMEZONES)
     context = browser.new_context(
-        user_agent=random.choice(USER_AGENTS),
+        user_agent=ua,
         viewport={"width": width, "height": height},
-        locale="en-US",
-        timezone_id="America/New_York",
+        locale=lang_header.split(",")[0],
+        timezone_id=tz,
+        extra_http_headers={
+            "Accept-Language": lang_header,
+            "Referer": "https://www.google.com/",
+        },
     )
+    logger.debug(f"Context UA={ua}, TZ={tz}, Lang={lang_header}")
     return browser, context
 
 def fetch_html(context, url: str, debug: bool) -> str:
@@ -305,6 +309,8 @@ def fetch_html(context, url: str, debug: bool) -> str:
     replay_telemetry(page, "telemetry.json")
     logger.info(f"Fetching {url}")
     response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    if response:
+        logger.debug(f"Navigation status {response.status} {response.url}")
     for _ in range(random.randint(1, 2)):
         page.mouse.wheel(0, random.randint(200, 800))
         time.sleep(random.uniform(0.2, 0.5))
@@ -314,6 +320,14 @@ def fetch_html(context, url: str, debug: bool) -> str:
         save_debug_html(html)
         logger.debug(f"Saved debug HTML for {url}")
     if response and response.status >= 400:
+        screenshot_path = f"logs/access_denied_{int(time.time())}.png"
+        page.screenshot(path=screenshot_path)
+        logger.error(
+            "Access Denied %s %s -- screenshot saved to %s",
+            response.status,
+            url,
+            screenshot_path,
+        )
         raise ValueError(f"HTTP {response.status}")
     page.close()
     return html
@@ -335,7 +349,14 @@ def search_truepeoplesearch(
     setup_telemetry_logging(page)
     apply_stealth(page)
     random_mouse_movement(page)
-    page.goto("https://www.truepeoplesearch.com/", wait_until="domcontentloaded", timeout=30000)
+    resp = page.goto(
+        "https://www.truepeoplesearch.com/",
+        wait_until="domcontentloaded",
+        timeout=30000,
+    )
+    if resp and resp.status >= 400:
+        logger.error("Access denied on initial page: %s", resp.status)
+        page.screenshot(path="logs/access_denied_start.png")
     random_mouse_movement(page)
 
     try:
@@ -491,7 +512,11 @@ def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -
     setup_telemetry_logging(page)
     apply_stealth(page)
     replay_telemetry(page, "telemetry.json")
-    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    resp = page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    if resp and resp.status >= 400:
+        logger.error("Access denied on FPS search: %s", resp.status)
+        page.screenshot(path="logs/access_denied_fps.png")
+
     time.sleep(3)
     try:
         page.wait_for_selector("div.card", timeout=8000)
