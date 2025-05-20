@@ -194,6 +194,22 @@ def load_cookie_store(path: str | None) -> None:
         logger.debug("Cookie store load failed: %s", exc)
 
 
+
+def save_cookie_store(path: str | None) -> None:
+    if not path:
+        return
+    try:
+        with SESSION_LOCK:
+            data = SESSION_COOKIES
+        Path(path).write_text(json.dumps(data))
+        logger.debug("Saved cookie store to %s", path)
+    except Exception as exc:
+        logger.debug("Cookie store save failed: %s", exc)
+
+from dataclasses import dataclass, field
+import threading
+
+
 def save_cookie_store(path: str | None) -> None:
     if not path:
         return
