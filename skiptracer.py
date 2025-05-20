@@ -1269,8 +1269,10 @@ def main() -> None:
     parser.add_argument(
         "--parallel",
         type=int,
-        default=0,
-        help="Number of parallel browser contexts to run",
+        nargs="?",
+        const=5,
+        default=5,
+        help="Number of parallel browser contexts to run (default: 5)",
     )
     args = parser.parse_args()
 
