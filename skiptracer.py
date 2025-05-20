@@ -69,8 +69,33 @@ LANGUAGES = [
 # Each entry should be in the form 'http://user:pass@host:port'
 # Decodo residential proxy
 PROXIES = [
-    "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10001",
+    "http://Sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10001",
+    "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10002",
+    "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10003",
+    "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10004",
+    "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10005",
+    "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10006",
+    "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10007",
+    "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10008",
+    "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10009",
+    "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10010",
 ]
+
+
+class ProxyRotator:
+    """Rotate through a list of proxies sequentially."""
+
+    def __init__(self, proxies: List[str]):
+        self.proxies = proxies
+        self.index = 0
+
+    def next_proxy(self) -> Optional[str]:
+        if self.index >= len(self.proxies):
+            return None
+        proxy = self.proxies[self.index]
+        self.index += 1
+        logger.info("Switching to proxy %s", proxy)
+        return proxy
 
 def _parse_proxy(proxy: str) -> dict:
     """Return server/username/password dict for Playwright."""
@@ -395,7 +420,7 @@ def search_truepeoplesearch(
     inspect: bool,
     visible: bool,
     manual: bool,
-) -> List[Dict[str, object]]:
+) -> tuple[List[Dict[str, object]], bool]:
 
     if debug:
         print("Trying TruePeopleSearch...")
@@ -466,7 +491,7 @@ def search_truepeoplesearch(
         if debug:
             save_debug_html(html)
         page.close()
-        return []
+        return [], True
 
     try:
         city_input.press("Enter")
@@ -478,7 +503,7 @@ def search_truepeoplesearch(
             if debug:
                 print("Failed to submit address search")
             page.close()
-            return []
+            return [], True
     page.wait_for_load_state("domcontentloaded")
     time.sleep(3)
 
@@ -578,9 +603,9 @@ def search_truepeoplesearch(
                 "source": "TruePeopleSearch",
             })
     page.close()
-    return results
+    return results, bot_check
 
-def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -> List[Dict[str, object]]:
+def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -> tuple[List[Dict[str, object]], bool]:
     if debug:
         print("Trying FastPeopleSearch...")
 
@@ -602,6 +627,16 @@ def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -
     html = page.content()
     if debug:
         save_debug_html(html)
+
+    lower_html = html.lower()
+    bot_check = False
+    if (
+        "press & hold" in lower_html
+        or "robot check" in lower_html
+        or ("verify" in lower_html and "robot" in lower_html)
+        or "are you a human" in lower_html
+    ):
+        bot_check = True
 
     soup = BeautifulSoup(html, "html.parser")
     cards = soup.select("div.card a[href*='/person']")
@@ -646,7 +681,7 @@ def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -
             })
     page.close()
 
-    return results
+    return results, bot_check
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Autonomous skip tracing tool")
@@ -666,11 +701,20 @@ def main() -> None:
         logger.debug("Debug logging enabled")
 
     with sync_playwright() as p:
-        browser, context = create_context(p, args.visible, args.proxy)
-
+        rotator = ProxyRotator([args.proxy] if args.proxy else PROXIES)
         results: List[Dict[str, object]] = []
-        try:
-            results.extend(search_truepeoplesearch(
+        bot_block = True
+
+        while bot_block:
+            proxy = rotator.next_proxy()
+            if proxy is None:
+                logger.error("All proxies exhausted without bypassing bot protection")
+                break
+
+            browser, context = create_context(p, args.visible, proxy)
+
+            try:
+                res, bot_block = search_truepeoplesearch(
                     context,
                     args.address,
                     args.debug,
@@ -678,22 +722,28 @@ def main() -> None:
                     args.visible,
                     args.manual,
                 )
-            )
+                results.extend(res)
 
-        except Exception as exc:
-            if args.debug:
-                print(f"TruePeopleSearch failed: {exc}")
+                if args.fast and not bot_block:
+                    res2, bot2 = search_fastpeoplesearch(
+                        context,
+                        args.address,
+                        args.debug,
+                        args.inspect,
+                    )
+                    results.extend(res2)
+                    bot_block = bot_block or bot2
 
-        if args.fast:
-            try:
-                results.extend(search_fastpeoplesearch(context, args.address, args.debug, args.inspect))
-            except Exception as e:
+            except Exception as exc:
+                bot_block = True
                 if args.debug:
-                    print(f"FastPeopleSearch failed: {e}")
+                    print(f"Search error: {exc}")
 
+            context.close()
+            browser.close()
 
-        context.close()
-        browser.close()
+            if bot_block:
+                logger.warning("Bot protection triggered, rotating proxy")
 
     if args.save:
         Path("results.json").write_text(json.dumps(results, indent=2))
