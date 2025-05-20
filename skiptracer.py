@@ -6,7 +6,7 @@ import re
 import time
 from pathlib import Path
 from typing import List, Dict, Optional
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlsplit
 
 import numpy as np
 
@@ -85,6 +85,7 @@ def _parse_proxy(proxy: str) -> dict:
     if username and password:
         cfg.update({"username": username, "password": password})
     return cfg
+
 
 def _normalize_phone(number: str) -> str:
     digits = re.sub(r"\D", "", number)
@@ -295,7 +296,10 @@ def create_context(p, visible: bool, proxy: str | None) -> tuple:
         user = cfg.get("username")
         info = f"{cfg['server']} (user={user})" if user else cfg["server"]
         logger.info(f"Using proxy {info}")
+
     browser = p.chromium.launch(**launch_args)
+
+
     width = random.randint(1280, 1920)
     height = random.randint(720, 1080)
     logger.debug(f"Browser viewport {width}x{height}")
@@ -311,6 +315,7 @@ def create_context(p, visible: bool, proxy: str | None) -> tuple:
         locale=lang_header.split(',')[0],
         timezone_id=tz,
         extra_http_headers={"Accept-Language": lang_header},
+
     )
     logger.debug(f"Context UA={ua}, TZ={tz}, Lang={lang_header}")
     return browser, context
@@ -325,6 +330,8 @@ def fetch_html(context, url: str, debug: bool) -> str:
     replay_telemetry(page, "telemetry.json")
     logger.info(f"Fetching {url}")
     response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    if response:
+        logger.debug(f"Navigation status {response.status} {response.url}")
     for _ in range(random.randint(1, 2)):
         page.mouse.wheel(0, random.randint(200, 800))
         time.sleep(random.uniform(0.2, 0.5))
@@ -334,6 +341,12 @@ def fetch_html(context, url: str, debug: bool) -> str:
         save_debug_html(html)
         logger.debug(f"Saved debug HTML for {url}")
     if response and response.status >= 400:
+        Path("logs").mkdir(exist_ok=True)
+        ts = int(time.time())
+        screenshot = f"logs/error_{ts}.png"
+        page.screenshot(path=screenshot)
+        logger.debug(f"Saved error screenshot {screenshot}")
+
         raise ValueError(f"HTTP {response.status}")
     page.close()
     return html
@@ -355,7 +368,14 @@ def search_truepeoplesearch(
     setup_telemetry_logging(page)
     apply_stealth(page)
     random_mouse_movement(page)
-    page.goto("https://www.truepeoplesearch.com/", wait_until="domcontentloaded", timeout=30000)
+    resp = page.goto(
+        "https://www.truepeoplesearch.com/",
+        wait_until="domcontentloaded",
+        timeout=30000,
+    )
+    if resp and resp.status >= 400:
+        logger.error("Access denied on initial page: %s", resp.status)
+        page.screenshot(path="logs/access_denied_start.png")
     random_mouse_movement(page)
 
     try:
@@ -512,6 +532,7 @@ def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -
     apply_stealth(page)
     replay_telemetry(page, "telemetry.json")
     page.goto(url, wait_until="domcontentloaded", timeout=30000)
+
     time.sleep(3)
     try:
         page.wait_for_selector("div.card", timeout=8000)
