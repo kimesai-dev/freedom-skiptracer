@@ -52,6 +52,28 @@ USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
 ]
 
+# Browser fingerprint attributes for spoofing
+PLATFORMS = [
+    "Win32",
+    "Linux x86_64",
+    "MacIntel",
+]
+VENDORS = [
+    "Google Inc.",
+    "Apple Computer, Inc.",
+    "",  # Some browsers report an empty vendor
+]
+PRODUCT_SUBS = [
+    "20030107",
+    "20100101",
+]
+LANGUAGE_SETS = [
+    ["en-US", "en"],
+    ["en-GB", "en"],
+    ["en-US", "en-GB", "en"],
+
+]
+
 # Common timezones for fingerprint randomization
 TIMEZONES = [
     "America/New_York",
@@ -144,7 +166,15 @@ class ProxyRotator:
         global HUMANIZATION_SCALE
         self.failures += 1
         HUMANIZATION_SCALE = min(2.0, HUMANIZATION_SCALE + 0.1)
-        logger.warning("Proxy failure (%s) count=%d scale=%.2f", reason, self.failures, HUMANIZATION_SCALE)
+        logger.warning(
+            "Proxy failure (%s) count=%d success=%d scale=%.2f mode=%s",
+            reason,
+            self.failures,
+            self.success,
+            HUMANIZATION_SCALE,
+            self.mode,
+        )
+
         if self.mode == "residential" and self.failures >= 2:
             logger.warning("Switching to mobile proxies due to repeated failures")
             self.mode = "mobile"
@@ -159,6 +189,14 @@ class ProxyRotator:
         if self.mode == "mobile" and time.time() - self.last_mobile > 300:
             logger.info("Returning to residential proxies after cooldown")
             self.mode = "residential"
+        logger.info(
+            "Proxy success count=%d failures=%d mode=%s scale=%.2f",
+            self.success,
+            self.failures,
+            self.mode,
+            HUMANIZATION_SCALE,
+        )
+
 
 def _parse_proxy(proxy: str) -> dict:
     """Return server/username/password dict for Playwright."""
@@ -211,6 +249,32 @@ def check_security_service(page, html: str, url: str) -> bool:
         return True
     return False
 
+def check_white_screen(page, html: str, url: str, selector: str | None = None) -> bool:
+    """Detect Cloudflare white screen/blank page blocks."""
+    short = len(html) < 1000
+    missing = False
+    if selector:
+        try:
+            soup = BeautifulSoup(html, "html.parser")
+            if not soup.select_one(selector):
+                missing = True
+        except Exception:
+            pass
+    if short or missing:
+        Path("logs").mkdir(exist_ok=True)
+        screenshot = f"logs/white_screen_{int(time.time())}.png"
+        page.screenshot(path=screenshot)
+        logger.warning(
+            "White screen detected at %s short=%s missing=%s screenshot=%s",
+            url,
+            short,
+            missing,
+            screenshot,
+        )
+        return True
+    return False
+
+
 def reset_storage(context) -> None:
     """Clear cookies and storage to avoid reuse across sessions."""
     try:
@@ -225,16 +289,21 @@ def apply_stealth(page) -> None:
 
     hw_concurrency = random.randint(4, 8)
     dev_mem = random.choice([4, 8])
+    platform = random.choice(PLATFORMS)
+    vendor = random.choice(VENDORS)
+    product_sub = random.choice(PRODUCT_SUBS)
+    languages = random.choice(LANGUAGE_SETS)
 
     page.add_init_script(
         f"""
-        Object.defineProperty(navigator, 'webdriver', {{get: () => undefined}});
+        Object.defineProperty(navigator, 'webdriver', {{get: () => false}});
         window.chrome = window.chrome || {{ runtime: {{}} }};
         Object.defineProperty(navigator, 'plugins', {{ get: () => [1, 2, 3, 4] }});
-        Object.defineProperty(navigator, 'languages', {{ get: () => ['en-US', 'en'] }});
+        Object.defineProperty(navigator, 'languages', {{ get: () => {json.dumps(languages)} }});
         Object.defineProperty(navigator, 'hardwareConcurrency', {{ get: () => {hw_concurrency} }});
         Object.defineProperty(navigator, 'deviceMemory', {{ get: () => {dev_mem} }});
-        Object.defineProperty(navigator, 'platform', {{ get: () => 'Win32' }});
+        Object.defineProperty(navigator, 'platform', {{ get: () => '{platform}' }});
+
         const getParameter = WebGLRenderingContext.prototype.getParameter;
         WebGLRenderingContext.prototype.getParameter = function(param) {{
             if (param === 37445) return 'Intel Inc.';
@@ -243,12 +312,21 @@ def apply_stealth(page) -> None:
         }};
         const toDataURL = HTMLCanvasElement.prototype.toDataURL;
         HTMLCanvasElement.prototype.toDataURL = function() {{ return 'data:image/png;base64,AAAA'; }};
-        Object.defineProperty(navigator, 'vendor', {{ get: () => 'Google Inc.' }});
+        Object.defineProperty(navigator, 'vendor', {{ get: () => '{vendor}' }});
+        Object.defineProperty(navigator, 'productSub', {{ get: () => '{product_sub}' }});
+
         navigator.mediaDevices.getUserMedia = undefined;
         """
     )
     # Apply additional stealth modifications from playwright-stealth
     stealth_sync(page)
+    logger.debug(
+        "Stealth props platform=%s vendor=%s productSub=%s languages=%s", 
+        platform,
+        vendor,
+        product_sub,
+        languages,
+    )
 
 def _cubic_bezier(p0: float, p1: float, p2: float, p3: float, t: float) -> float:
     """Return a single dimension of a cubic Bezier curve."""
@@ -329,7 +407,8 @@ def smooth_mouse_move_ml(
 def random_mouse_movement(page, width: int = 1366, height: int = 768) -> None:
     """Perform several smooth mouse moves around the page."""
     start_x, start_y = CURRENT_MOUSE_POS
-    move_count = int(random.randint(5, 10) * HUMANIZATION_SCALE)
+    move_count = int(random.randint(8, 15) * HUMANIZATION_SCALE)
+
     for _ in range(move_count):
         x = random.randint(0, width)
         y = random.randint(0, height)
@@ -412,6 +491,25 @@ def replay_telemetry(page, telemetry_file: str) -> None:
             except Exception as exc:
                 logger.debug("Replay error %s", exc)
 
+def intercept_beacon(context) -> None:
+    """Intercept Cloudflare beacon.min.js requests."""
+
+    def handler(route, request) -> None:
+        action = random.choice(["block", "delay", "allow"])
+        if action == "block":
+            logger.debug("Blocking beacon %s", request.url)
+            route.abort()
+        elif action == "delay":
+            delay = random.uniform(1000, 3000)
+            logger.debug("Delaying beacon %.0fms %s", delay, request.url)
+            time.sleep(delay / 1000)
+            route.continue_()
+        else:
+            logger.debug("Allowing beacon %s", request.url)
+            route.continue_()
+
+    context.route("https://static.cloudflareinsights.com/beacon.min.js", handler)
+
 def create_context(p, visible: bool, proxy: str | None) -> tuple:
     """Launch a browser with randomized context settings."""
 
@@ -455,6 +553,7 @@ def create_context(p, visible: bool, proxy: str | None) -> tuple:
     )
     stealth_sync(context)
     reset_storage(context)
+    intercept_beacon(context)
     logger.debug(
         "Context UA=%s TZ=%s Lang=%s headers=%s",
         ua,
@@ -481,9 +580,10 @@ def fetch_html(context, url: str, debug: bool) -> str:
     if response:
         logger.debug(f"Navigation status {response.status} {response.url}")
     for _ in range(random.randint(1, 2)):
-        page.mouse.wheel(0, random.randint(200, 800))
+        page.mouse.wheel(0, random.randint(200, 1200))
         time.sleep(random.uniform(0.2, 0.5) * HUMANIZATION_SCALE)
-    delay_after = random.uniform(800, 1500) * HUMANIZATION_SCALE
+    delay_after = random.uniform(5000, 10000) * HUMANIZATION_SCALE
+
     logger.debug("Waiting %.0fms after navigation", delay_after)
     page.wait_for_timeout(delay_after)
     html = page.content()
@@ -491,6 +591,10 @@ def fetch_html(context, url: str, debug: bool) -> str:
         save_debug_html(html)
         logger.debug(f"Saved debug HTML for {url}")
     check_for_cloudflare(page, html, url)
+    if check_white_screen(page, html, url):
+        page.close()
+        raise RuntimeError("WHITE_SCREEN")
+
     if check_security_service(page, html, url):
         page.close()
         raise RuntimeError("SECURITY_SERVICE")
@@ -525,14 +629,16 @@ def search_truepeoplesearch(
     reset_storage(context)
 
     inter_url = "https://www.google.com/"
-    delay = random.uniform(800, 1500) * HUMANIZATION_SCALE
+    delay = random.uniform(5000, 10000) * HUMANIZATION_SCALE
+
     logger.debug("Navigating to intermediate %s after %.0fms", inter_url, delay)
     page.wait_for_timeout(delay)
     try:
         page.goto(inter_url, timeout=15000)
     except Exception as exc:
         logger.debug("Intermediate navigation failed: %s", exc)
-    page.wait_for_timeout(random.uniform(1000, 2000) * HUMANIZATION_SCALE)
+    page.wait_for_timeout(random.uniform(5000, 10000) * HUMANIZATION_SCALE)
+
 
     try:
         resp = page.goto(
@@ -552,7 +658,8 @@ def search_truepeoplesearch(
     if resp and resp.status >= 400:
         logger.error("Access denied on initial page: %s", resp.status)
         page.screenshot(path="logs/access_denied_start.png")
-    page.wait_for_timeout(random.uniform(800, 1500) * HUMANIZATION_SCALE)
+    page.wait_for_timeout(random.uniform(5000, 10000) * HUMANIZATION_SCALE)
+
     random_mouse_movement(page)
 
     try:
@@ -588,7 +695,8 @@ def search_truepeoplesearch(
 
     try:
         city_input.press("Enter")
-        time.sleep(3 * HUMANIZATION_SCALE)
+        time.sleep(random.uniform(5, 10) * HUMANIZATION_SCALE)
+
     except Exception:
         try:
             page.click("button[type='submit']")
@@ -598,13 +706,14 @@ def search_truepeoplesearch(
             page.close()
             return [], True
     page.wait_for_load_state("domcontentloaded")
-    time.sleep(3 * HUMANIZATION_SCALE)
+    time.sleep(random.uniform(5, 10) * HUMANIZATION_SCALE)
 
-    time.sleep(3 * HUMANIZATION_SCALE)
+    time.sleep(random.uniform(5, 10) * HUMANIZATION_SCALE)
     page.wait_for_load_state("domcontentloaded")
     for _ in range(random.randint(1, 3)):
-        page.mouse.wheel(0, random.randint(200, 800))
-        time.sleep(random.uniform(0.3, 0.8) * HUMANIZATION_SCALE)
+        page.mouse.wheel(0, random.randint(200, 1200))
+        time.sleep(random.uniform(0.5, 1.0) * HUMANIZATION_SCALE)
+
     random_mouse_movement(page)
 
     html = page.content()
@@ -612,6 +721,10 @@ def search_truepeoplesearch(
         Path("logs").mkdir(exist_ok=True)
         Path("logs/page_after_submit.html").write_text(html)
     check_for_cloudflare(page, html, "https://www.truepeoplesearch.com/")
+    if check_white_screen(page, html, "https://www.truepeoplesearch.com/", "div.card"):
+        page.close()
+        return [], True
+
     if check_security_service(page, html, "https://www.truepeoplesearch.com/"):
         page.close()
         return [], True
@@ -718,15 +831,21 @@ def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -
     replay_telemetry(page, "telemetry.json")
     page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
-    time.sleep(3 * HUMANIZATION_SCALE)
+    time.sleep(random.uniform(5, 10) * HUMANIZATION_SCALE)
+
     try:
         page.wait_for_selector("div.card", timeout=int(8000 * HUMANIZATION_SCALE))
     except Exception:
         pass
-    page.mouse.wheel(0, random.randint(200, 800))
+    page.mouse.wheel(0, random.randint(200, 1200))
     html = page.content()
     if debug:
         save_debug_html(html)
+
+    check_for_cloudflare(page, html, url)
+    if check_white_screen(page, html, url, "div.card"):
+        page.close()
+        return [], True
 
     if check_security_service(page, html, url):
         page.close()
