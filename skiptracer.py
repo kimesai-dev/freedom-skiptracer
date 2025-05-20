@@ -12,6 +12,7 @@ from urllib.parse import quote_plus, urlsplit
 import urllib.robotparser
 
 import numpy as np
+from dataclasses import dataclass, field
 
 from human_behavior_ml import (
     load_behavior_model,
@@ -193,6 +194,7 @@ def load_cookie_store(path: str | None) -> None:
         logger.debug("Cookie store load failed: %s", exc)
 
 
+
 def save_cookie_store(path: str | None) -> None:
     if not path:
         return
@@ -207,6 +209,17 @@ def save_cookie_store(path: str | None) -> None:
 from dataclasses import dataclass, field
 import threading
 
+
+def save_cookie_store(path: str | None) -> None:
+    if not path:
+        return
+    try:
+        with SESSION_LOCK:
+            data = SESSION_COOKIES
+        Path(path).write_text(json.dumps(data))
+        logger.debug("Saved cookie store to %s", path)
+    except Exception as exc:
+        logger.debug("Cookie store save failed: %s", exc)
 
 @dataclass
 class ProxyStats:
