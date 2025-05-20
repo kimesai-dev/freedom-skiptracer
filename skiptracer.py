@@ -64,6 +64,7 @@ def parse_proxy_url(proxy_url: str) -> dict:
         "password": parsed.password,
     }
 
+
 def _normalize_phone(number: str) -> str:
     digits = re.sub(r"\D", "", number)
     if len(digits) == 10:
@@ -280,6 +281,7 @@ def create_context(p, visible: bool, proxy: str | None) -> tuple:
     except Exception as exc:
         logger.error(f"Failed to launch browser with proxy {proxy}: {exc}")
         raise
+
     width = random.randint(1280, 1920)
     height = random.randint(720, 1080)
     logger.debug(f"Browser viewport {width}x{height}")
