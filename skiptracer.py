@@ -71,6 +71,7 @@ LANGUAGE_SETS = [
     ["en-US", "en"],
     ["en-GB", "en"],
     ["en-US", "en-GB", "en"],
+
 ]
 
 # Common timezones for fingerprint randomization
@@ -173,6 +174,7 @@ class ProxyRotator:
             HUMANIZATION_SCALE,
             self.mode,
         )
+
         if self.mode == "residential" and self.failures >= 2:
             logger.warning("Switching to mobile proxies due to repeated failures")
             self.mode = "mobile"
@@ -194,6 +196,7 @@ class ProxyRotator:
             self.mode,
             HUMANIZATION_SCALE,
         )
+
 
 def _parse_proxy(proxy: str) -> dict:
     """Return server/username/password dict for Playwright."""
@@ -271,6 +274,7 @@ def check_white_screen(page, html: str, url: str, selector: str | None = None) -
         return True
     return False
 
+
 def reset_storage(context) -> None:
     """Clear cookies and storage to avoid reuse across sessions."""
     try:
@@ -299,6 +303,7 @@ def apply_stealth(page) -> None:
         Object.defineProperty(navigator, 'hardwareConcurrency', {{ get: () => {hw_concurrency} }});
         Object.defineProperty(navigator, 'deviceMemory', {{ get: () => {dev_mem} }});
         Object.defineProperty(navigator, 'platform', {{ get: () => '{platform}' }});
+
         const getParameter = WebGLRenderingContext.prototype.getParameter;
         WebGLRenderingContext.prototype.getParameter = function(param) {{
             if (param === 37445) return 'Intel Inc.';
@@ -309,6 +314,7 @@ def apply_stealth(page) -> None:
         HTMLCanvasElement.prototype.toDataURL = function() {{ return 'data:image/png;base64,AAAA'; }};
         Object.defineProperty(navigator, 'vendor', {{ get: () => '{vendor}' }});
         Object.defineProperty(navigator, 'productSub', {{ get: () => '{product_sub}' }});
+
         navigator.mediaDevices.getUserMedia = undefined;
         """
     )
@@ -402,6 +408,7 @@ def random_mouse_movement(page, width: int = 1366, height: int = 768) -> None:
     """Perform several smooth mouse moves around the page."""
     start_x, start_y = CURRENT_MOUSE_POS
     move_count = int(random.randint(8, 15) * HUMANIZATION_SCALE)
+
     for _ in range(move_count):
         x = random.randint(0, width)
         y = random.randint(0, height)
@@ -576,6 +583,7 @@ def fetch_html(context, url: str, debug: bool) -> str:
         page.mouse.wheel(0, random.randint(200, 1200))
         time.sleep(random.uniform(0.2, 0.5) * HUMANIZATION_SCALE)
     delay_after = random.uniform(5000, 10000) * HUMANIZATION_SCALE
+
     logger.debug("Waiting %.0fms after navigation", delay_after)
     page.wait_for_timeout(delay_after)
     html = page.content()
@@ -586,6 +594,7 @@ def fetch_html(context, url: str, debug: bool) -> str:
     if check_white_screen(page, html, url):
         page.close()
         raise RuntimeError("WHITE_SCREEN")
+
     if check_security_service(page, html, url):
         page.close()
         raise RuntimeError("SECURITY_SERVICE")
@@ -621,6 +630,7 @@ def search_truepeoplesearch(
 
     inter_url = "https://www.google.com/"
     delay = random.uniform(5000, 10000) * HUMANIZATION_SCALE
+
     logger.debug("Navigating to intermediate %s after %.0fms", inter_url, delay)
     page.wait_for_timeout(delay)
     try:
@@ -628,6 +638,7 @@ def search_truepeoplesearch(
     except Exception as exc:
         logger.debug("Intermediate navigation failed: %s", exc)
     page.wait_for_timeout(random.uniform(5000, 10000) * HUMANIZATION_SCALE)
+
 
     try:
         resp = page.goto(
@@ -648,6 +659,7 @@ def search_truepeoplesearch(
         logger.error("Access denied on initial page: %s", resp.status)
         page.screenshot(path="logs/access_denied_start.png")
     page.wait_for_timeout(random.uniform(5000, 10000) * HUMANIZATION_SCALE)
+
     random_mouse_movement(page)
 
     try:
@@ -684,6 +696,7 @@ def search_truepeoplesearch(
     try:
         city_input.press("Enter")
         time.sleep(random.uniform(5, 10) * HUMANIZATION_SCALE)
+
     except Exception:
         try:
             page.click("button[type='submit']")
@@ -700,6 +713,7 @@ def search_truepeoplesearch(
     for _ in range(random.randint(1, 3)):
         page.mouse.wheel(0, random.randint(200, 1200))
         time.sleep(random.uniform(0.5, 1.0) * HUMANIZATION_SCALE)
+
     random_mouse_movement(page)
 
     html = page.content()
@@ -710,6 +724,7 @@ def search_truepeoplesearch(
     if check_white_screen(page, html, "https://www.truepeoplesearch.com/", "div.card"):
         page.close()
         return [], True
+
     if check_security_service(page, html, "https://www.truepeoplesearch.com/"):
         page.close()
         return [], True
@@ -817,6 +832,7 @@ def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -
     page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
     time.sleep(random.uniform(5, 10) * HUMANIZATION_SCALE)
+
     try:
         page.wait_for_selector("div.card", timeout=int(8000 * HUMANIZATION_SCALE))
     except Exception:
@@ -830,6 +846,7 @@ def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -
     if check_white_screen(page, html, url, "div.card"):
         page.close()
         return [], True
+
     if check_security_service(page, html, url):
         page.close()
         return [], True
