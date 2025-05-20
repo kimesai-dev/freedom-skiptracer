@@ -49,26 +49,43 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:118.0) Gecko/20100101 Firefox/118.0",
 ]
 
+# Common timezones for fingerprint randomization
+TIMEZONES = [
+    "America/New_York",
+    "America/Chicago",
+    "America/Los_Angeles",
+    "Europe/London",
+    "Europe/Berlin",
+]
+
+# Accept-Language header values to rotate
+LANGUAGES = [
+    "en-US,en;q=0.9",
+    "en-GB,en;q=0.8",
+    "de-DE,de;q=0.8,en-US;q=0.5",
+]
+
 # List of residential proxies used for rotation to distribute requests.
 # Each entry should be in the form 'http://user:pass@host:port'
 PROXIES = [
-    # Default Decodo residential proxy
-    "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10001",
+    "http://user:pass@res-proxy1.com:8000",
+    "http://user:pass@res-proxy2.com:8000",
     # Additional proxies can be added here for rotation
 ]
 
-def _parse_proxy(url: str) -> Dict[str, str]:
-    """Convert proxy URL into Playwright proxy configuration."""
-    match = re.match(r"https?://(?:(?P<user>[^:]+):(?P<pass>[^@]+)@)?(?P<host>[^:]+):(?P<port>\d+)", url)
+def _parse_proxy(proxy: str) -> dict:
+    """Return server/username/password dict for Playwright."""
+    match = re.match(r"(https?://)?(?:(.+?):(.+)@)?([^:]+:\d+)", proxy)
     if not match:
-        raise ValueError(f"Invalid proxy URL: {url}")
-    info = match.groupdict()
-    server = f"http://{info['host']}:{info['port']}"
-    config = {"server": server}
-    if info.get("user"):
-        config["username"] = info["user"]
-        config["password"] = info["pass"] or ""
-    return config
+        return {"server": proxy}
+    server = f"http://{match.group(4)}"
+    username = match.group(2)
+    password = match.group(3)
+    cfg = {"server": server}
+    if username and password:
+        cfg.update({"username": username, "password": password})
+    return cfg
+
 
 def _normalize_phone(number: str) -> str:
     digits = re.sub(r"\D", "", number)
@@ -274,11 +291,11 @@ def create_context(p, visible: bool, proxy: str | None) -> tuple:
         # Randomly select a residential proxy for rotation
         proxy = random.choice(PROXIES)
     if proxy:
-        proxy_conf = _parse_proxy(proxy)
-        launch_args["proxy"] = proxy_conf
-        logger.info(
-            "Using proxy %s (user=%s)", proxy_conf["server"], proxy_conf.get("username")
-        )
+        cfg = _parse_proxy(proxy)
+        launch_args["proxy"] = cfg
+        user = cfg.get("username")
+        info = f"{cfg['server']} (user={user})" if user else cfg["server"]
+        logger.info(f"Using proxy {info}")
 
     browser = p.chromium.launch(**launch_args)
 
@@ -288,19 +305,16 @@ def create_context(p, visible: bool, proxy: str | None) -> tuple:
     logger.debug(f"Browser viewport {width}x{height}")
     CURRENT_MOUSE_POS[0] = width / 2
     CURRENT_MOUSE_POS[1] = height / 2
+
     ua = random.choice(USER_AGENTS)
-    tz = random.choice([
-        "America/New_York",
-        "America/Chicago",
-        "America/Los_Angeles",
-    ])
-    lang = random.choice(["en-US,en;q=0.9", "en-GB,en;q=0.8"])
-    logger.debug(f"Context UA={ua}, TZ={tz}, Lang={lang}")
+    tz = random.choice(TIMEZONES)
+    lang_header = random.choice(LANGUAGES)
     context = browser.new_context(
         user_agent=ua,
         viewport={"width": width, "height": height},
-        locale=lang.split(",")[0],
+        locale=lang_header.split(',')[0],
         timezone_id=tz,
+        extra_http_headers={"Accept-Language": lang_header},
 
     )
     logger.debug(f"Context UA={ua}, TZ={tz}, Lang={lang_header}")
