@@ -67,10 +67,9 @@ LANGUAGES = [
 
 # List of residential proxies used for rotation to distribute requests.
 # Each entry should be in the form 'http://user:pass@host:port'
+# Decodo residential proxy
 PROXIES = [
-    "http://user:pass@res-proxy1.com:8000",
-    "http://user:pass@res-proxy2.com:8000",
-    # Additional proxies can be added here for rotation
+    "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10001",
 ]
 
 def _parse_proxy(proxy: str) -> dict:
@@ -293,9 +292,12 @@ def create_context(p, visible: bool, proxy: str | None) -> tuple:
     if proxy:
         cfg = _parse_proxy(proxy)
         launch_args["proxy"] = cfg
-        user = cfg.get("username")
-        info = f"{cfg['server']} (user={user})" if user else cfg["server"]
-        logger.info(f"Using proxy {info}")
+        logger.info(
+            "Using proxy server=%s username=%s password=%s",
+            cfg.get("server"),
+            cfg.get("username"),
+            cfg.get("password"),
+        )
 
     browser = p.chromium.launch(**launch_args)
 
@@ -368,11 +370,21 @@ def search_truepeoplesearch(
     setup_telemetry_logging(page)
     apply_stealth(page)
     random_mouse_movement(page)
-    resp = page.goto(
-        "https://www.truepeoplesearch.com/",
-        wait_until="domcontentloaded",
-        timeout=30000,
-    )
+    try:
+        resp = page.goto(
+            "https://www.truepeoplesearch.com/",
+            wait_until="domcontentloaded",
+            timeout=30000,
+        )
+        if resp:
+            logger.info(
+                "Reached TruePeopleSearch via proxy (status %s)", resp.status
+            )
+        else:
+            logger.error("Navigation returned no response")
+    except Exception as exc:
+        logger.error("Navigation to TruePeopleSearch failed: %s", exc)
+        raise
     if resp and resp.status >= 400:
         logger.error("Access denied on initial page: %s", resp.status)
         page.screenshot(path="logs/access_denied_start.png")
