@@ -2,3 +2,4 @@ playwright
 beautifulsoup4
 numpy
 stable-baselines3
+playwright-stealth
