@@ -132,6 +132,10 @@ MAX_PARALLEL_CONTEXTS = 5
 # Initial percentage of mobile proxies to allocate.
 INITIAL_MOBILE_RATIO = 0.3
 
+# Storage for reusable session cookies keyed by domain
+SESSION_COOKIES: dict[str, list] = {}
+SESSION_LOCK = threading.Lock()
+
 from dataclasses import dataclass, field
 import threading
 
@@ -144,6 +148,8 @@ class ProxyStats:
     failure: int = 0
     blocks: int = 0
     times: list = field(default_factory=list)
+    cooldown_until: float = 0.0
+    fail_streak: int = 0
 
 
 class ParallelProxyManager:
@@ -168,7 +174,12 @@ class ParallelProxyManager:
                 idx = 0
             proxy = pool[idx]
             idx += 1
-            if proxy not in self.in_use:
+            stat = self.stats.get(proxy)
+            if (
+                proxy not in self.in_use
+                and stat
+                and stat.cooldown_until <= time.time()
+            ):
                 self.in_use.add(proxy)
                 return proxy, idx
             if idx == start:
@@ -203,10 +214,17 @@ class ParallelProxyManager:
                 stat.times.append(duration)
                 if success:
                     stat.success += 1
+                    stat.fail_streak = 0
                 else:
                     stat.failure += 1
+                    stat.fail_streak += 1
                 if blocked:
                     stat.blocks += 1
+                    stat.fail_streak += 1
+                if stat.fail_streak >= 3:
+                    stat.cooldown_until = time.time() + 120
+                    stat.fail_streak = 0
+                    logger.info("[CTX] Cooling down proxy %s for 120s", proxy)
             if ptype == "residential" and not success:
                 self.mobile_ratio = min(0.7, self.mobile_ratio + 0.05)
             elif ptype == "residential" and success:
@@ -219,6 +237,22 @@ class ParallelProxyManager:
                 blocked,
                 self.mobile_ratio,
             )
+
+    def log_stats(self) -> None:
+        """Output aggregated proxy health metrics."""
+        with self.lock:
+            for proxy, stat in self.stats.items():
+                if stat.success or stat.failure:
+                    avg = sum(stat.times) / len(stat.times) if stat.times else 0
+                    logger.info(
+                        "[STATS] %s succ=%d fail=%d blocks=%d avg_time=%.1fs cooldown=%.0f",
+                        proxy,
+                        stat.success,
+                        stat.failure,
+                        stat.blocks,
+                        avg,
+                        max(0, stat.cooldown_until - time.time()),
+                    )
 
 
 class ProxyRotator:
@@ -233,6 +267,7 @@ class ProxyRotator:
         self.failures = 0
         self.success = 0
         self.last_mobile = 0.0
+        self.stats = {p: ProxyStats() for p in residential + mobile}
 
     def _get_proxy(self, pool: List[str], idx: int) -> tuple[Optional[str], int]:
         if not pool:
@@ -269,6 +304,11 @@ class ProxyRotator:
             self.mode,
         )
 
+        proxy = self.residential[self.res_index - 1] if self.mode == "residential" else self.mobile[self.mob_index - 1]
+        stat = self.stats.get(proxy)
+        if stat:
+            stat.failure += 1
+
         if self.mode == "residential" and self.failures >= 2:
             logger.warning("Switching to mobile proxies due to repeated failures")
             self.mode = "mobile"
@@ -290,6 +330,23 @@ class ProxyRotator:
             self.mode,
             HUMANIZATION_SCALE,
         )
+        proxy = self.residential[self.res_index - 1] if self.mode == "residential" else self.mobile[self.mob_index - 1]
+        stat = self.stats.get(proxy)
+        if stat:
+            stat.success += 1
+
+    def log_stats(self) -> None:
+        for proxy, stat in self.stats.items():
+            if stat.success or stat.failure:
+                avg = sum(stat.times) / len(stat.times) if stat.times else 0
+                logger.info(
+                    "[STATS] %s succ=%d fail=%d blocks=%d avg_time=%.1fs",
+                    proxy,
+                    stat.success,
+                    stat.failure,
+                    stat.blocks,
+                    avg,
+                )
 
 
 def _parse_proxy(proxy: str) -> dict:
@@ -368,6 +425,28 @@ def check_white_screen(page, html: str, url: str, selector: str | None = None) -
         return True
     return False
 
+def detect_js_challenge(page, html: str, url: str) -> bool:
+    """Detect Cloudflare JavaScript challenge pages."""
+    lower = html.lower()
+    if "just a moment" in lower and "cloudflare" in lower:
+        Path("logs").mkdir(exist_ok=True)
+        screenshot = f"logs/js_challenge_{int(time.time())}.png"
+        page.screenshot(path=screenshot)
+        logger.warning("JS challenge at %s screenshot %s", url, screenshot)
+        return True
+    return False
+
+def detect_turnstile(page, html: str, url: str) -> bool:
+    """Detect Cloudflare Turnstile CAPTCHA."""
+    if "cf-turnstile" in html.lower() or "challenges.cloudflare.com" in html.lower():
+        Path("logs").mkdir(exist_ok=True)
+        screenshot = f"logs/turnstile_{int(time.time())}.png"
+        page.screenshot(path=screenshot)
+        logger.warning("Turnstile CAPTCHA at %s screenshot %s", url, screenshot)
+        # Integration point for manual solve or CAPTCHA service
+        return True
+    return False
+
 
 def reset_storage(context) -> None:
     """Clear cookies and storage to avoid reuse across sessions."""
@@ -378,6 +457,27 @@ def reset_storage(context) -> None:
     except Exception as exc:
         logger.debug("Storage reset failed: %s", exc)
 
+def restore_cookies(context, domain: str) -> None:
+    """Load stored cookies for a domain into the context."""
+    with SESSION_LOCK:
+        cookies = SESSION_COOKIES.get(domain)
+    if cookies:
+        try:
+            context.add_cookies(cookies)
+            logger.debug("Restored %d cookies for %s", len(cookies), domain)
+        except Exception as exc:
+            logger.debug("Cookie restore failed: %s", exc)
+
+def store_cookies(context, domain: str) -> None:
+    """Persist cookies from the context for reuse."""
+    try:
+        cookies = context.cookies(f"https://{domain}")
+        with SESSION_LOCK:
+            SESSION_COOKIES[domain] = cookies
+        logger.debug("Stored %d cookies for %s", len(cookies), domain)
+    except Exception as exc:
+        logger.debug("Cookie save failed: %s", exc)
+
 def apply_stealth(page) -> None:
     """Spoof common fingerprint attributes using randomized values."""
 
@@ -387,12 +487,16 @@ def apply_stealth(page) -> None:
     vendor = random.choice(VENDORS)
     product_sub = random.choice(PRODUCT_SUBS)
     languages = random.choice(LANGUAGE_SETS)
+    plugins = [
+        f"Plugin {i} {random.choice(['PDF','Video','Audio'])}"
+        for i in range(random.randint(3, 6))
+    ]
 
     page.add_init_script(
         f"""
         Object.defineProperty(navigator, 'webdriver', {{get: () => false}});
         window.chrome = window.chrome || {{ runtime: {{}} }};
-        Object.defineProperty(navigator, 'plugins', {{ get: () => [1, 2, 3, 4] }});
+        Object.defineProperty(navigator, 'plugins', {{ get: () => {json.dumps(plugins)} }});
         Object.defineProperty(navigator, 'languages', {{ get: () => {json.dumps(languages)} }});
         Object.defineProperty(navigator, 'hardwareConcurrency', {{ get: () => {hw_concurrency} }});
         Object.defineProperty(navigator, 'deviceMemory', {{ get: () => {dev_mem} }});
@@ -643,7 +747,7 @@ def create_context(p, visible: bool, proxy: str | None) -> tuple:
         geolocation={"longitude": lon, "latitude": lat},
         permissions=["geolocation"],
         device_scale_factor=1,
-        extra_http_headers={"Accept-Language": lang_header},
+        extra_http_headers={"Accept-Language": lang_header, "Referer": "https://www.google.com/"},
     )
     stealth_sync(context)
     reset_storage(context)
@@ -653,7 +757,7 @@ def create_context(p, visible: bool, proxy: str | None) -> tuple:
         ua,
         tz,
         lang_header,
-        {"Accept-Language": lang_header},
+        {"Accept-Language": lang_header, "Referer": "https://www.google.com/"},
     )
     return browser, context
 
@@ -664,6 +768,9 @@ def fetch_html(context, url: str, debug: bool) -> str:
     apply_stealth(page)
     random_mouse_movement(page)
     reset_storage(context)
+    restore_cookies(context, "www.truepeoplesearch.com")
+    domain = urlsplit(url).netloc
+    restore_cookies(context, domain)
     # Replay previously captured human telemetry to mimic authentic activity
     replay_telemetry(page, "telemetry.json")
     logger.info(f"Fetching {url}")
@@ -692,6 +799,12 @@ def fetch_html(context, url: str, debug: bool) -> str:
     if check_security_service(page, html, url):
         page.close()
         raise RuntimeError("SECURITY_SERVICE")
+    if detect_js_challenge(page, html, url):
+        page.close()
+        raise RuntimeError("JS_CHALLENGE")
+    if detect_turnstile(page, html, url):
+        page.close()
+        raise RuntimeError("TURNSTILE")
     if response and response.status >= 400:
         Path("logs").mkdir(exist_ok=True)
         ts = int(time.time())
@@ -700,6 +813,7 @@ def fetch_html(context, url: str, debug: bool) -> str:
         logger.debug(f"Saved error screenshot {screenshot}")
 
         raise ValueError(f"HTTP {response.status}")
+    store_cookies(context, domain)
     page.close()
     return html
 
@@ -909,6 +1023,7 @@ def search_truepeoplesearch(
                 "city_state": location,
                 "source": "TruePeopleSearch",
             })
+    store_cookies(context, "www.truepeoplesearch.com")
     page.close()
     return results, bot_check
 
@@ -922,6 +1037,7 @@ def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -
     page = context.new_page()
     setup_telemetry_logging(page)
     apply_stealth(page)
+    restore_cookies(context, "www.fastpeoplesearch.com")
     replay_telemetry(page, "telemetry.json")
     page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
@@ -942,6 +1058,12 @@ def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -
         return [], True
 
     if check_security_service(page, html, url):
+        page.close()
+        return [], True
+    if detect_js_challenge(page, html, url):
+        page.close()
+        return [], True
+    if detect_turnstile(page, html, url):
         page.close()
         return [], True
 
@@ -1000,6 +1122,7 @@ def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -
                 "city_state": location,
                 "source": "FastPeopleSearch",
             })
+    store_cookies(context, "www.fastpeoplesearch.com")
     page.close()
 
     return results, bot_check
@@ -1017,6 +1140,7 @@ def run_sequential(p, args) -> List[Dict[str, object]]:
             logger.error("All proxies exhausted without bypassing bot protection")
             break
 
+        start = time.time()
         browser, context = create_context(p, args.visible, proxy)
 
         try:
@@ -1050,12 +1174,17 @@ def run_sequential(p, args) -> List[Dict[str, object]]:
             if args.debug:
                 print(f"Search error: {exc}")
 
+        duration = time.time() - start
         context.close()
         browser.close()
+        stat = rotator.stats.get(proxy)
+        if stat:
+            stat.times.append(duration)
 
         if bot_block:
             logger.warning("Bot protection triggered, rotating proxy")
 
+    rotator.log_stats()
     return results
 
 
@@ -1122,7 +1251,7 @@ def run_parallel(args) -> List[Dict[str, object]]:
 
     for t in threads:
         t.join()
-
+    manager.log_stats()
     return results
 
 def main() -> None:
