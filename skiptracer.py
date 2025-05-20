@@ -102,6 +102,25 @@ def save_debug_html(html: str, name: str = "debug_last.html") -> None:
     Path("logs").mkdir(exist_ok=True)
     Path(f"logs/{name}").write_text(html)
 
+def check_for_cloudflare(page, html: str, url: str) -> None:
+    """Detect Cloudflare block pages and capture a screenshot."""
+    lower = html.lower()
+    if "you have been blocked" in lower or "cloudflare" in lower:
+        Path("logs").mkdir(exist_ok=True)
+        ts = int(time.time())
+        screenshot = f"logs/cloudflare_{ts}.png"
+        page.screenshot(path=screenshot)
+        logger.warning("Cloudflare block detected at %s, screenshot %s", url, screenshot)
+
+def reset_storage(context) -> None:
+    """Clear cookies and storage to avoid reuse across sessions."""
+    try:
+        context.clear_cookies()
+        context.add_init_script("() => { localStorage.clear(); sessionStorage.clear(); }")
+        logger.debug("Cleared cookies and storage for new context")
+    except Exception as exc:
+        logger.debug("Storage reset failed: %s", exc)
+
 def apply_stealth(page) -> None:
     """Spoof common fingerprint attributes using randomized values."""
 
@@ -316,10 +335,18 @@ def create_context(p, visible: bool, proxy: str | None) -> tuple:
         viewport={"width": width, "height": height},
         locale=lang_header.split(',')[0],
         timezone_id=tz,
+        device_scale_factor=1,
         extra_http_headers={"Accept-Language": lang_header},
-
     )
-    logger.debug(f"Context UA={ua}, TZ={tz}, Lang={lang_header}")
+    stealth_sync(context)
+    reset_storage(context)
+    logger.debug(
+        "Context UA=%s TZ=%s Lang=%s headers=%s",
+        ua,
+        tz,
+        lang_header,
+        {"Accept-Language": lang_header},
+    )
     return browser, context
 
 def fetch_html(context, url: str, debug: bool) -> str:
@@ -328,20 +355,27 @@ def fetch_html(context, url: str, debug: bool) -> str:
     setup_telemetry_logging(page)
     apply_stealth(page)
     random_mouse_movement(page)
+    reset_storage(context)
     # Replay previously captured human telemetry to mimic authentic activity
     replay_telemetry(page, "telemetry.json")
     logger.info(f"Fetching {url}")
+    wait_pre = random.uniform(500, 1500)
+    logger.debug("Waiting %.0fms before navigation", wait_pre)
+    page.wait_for_timeout(wait_pre)
     response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
     if response:
         logger.debug(f"Navigation status {response.status} {response.url}")
     for _ in range(random.randint(1, 2)):
         page.mouse.wheel(0, random.randint(200, 800))
         time.sleep(random.uniform(0.2, 0.5))
-    time.sleep(random.uniform(0.3, 0.7))
+    delay_after = random.uniform(800, 1500)
+    logger.debug("Waiting %.0fms after navigation", delay_after)
+    page.wait_for_timeout(delay_after)
     html = page.content()
     if debug:
         save_debug_html(html)
         logger.debug(f"Saved debug HTML for {url}")
+    check_for_cloudflare(page, html, url)
     if response and response.status >= 400:
         Path("logs").mkdir(exist_ok=True)
         ts = int(time.time())
@@ -370,6 +404,18 @@ def search_truepeoplesearch(
     setup_telemetry_logging(page)
     apply_stealth(page)
     random_mouse_movement(page)
+    reset_storage(context)
+
+    inter_url = "https://www.google.com/"
+    delay = random.uniform(800, 1500)
+    logger.debug("Navigating to intermediate %s after %.0fms", inter_url, delay)
+    page.wait_for_timeout(delay)
+    try:
+        page.goto(inter_url, timeout=15000)
+    except Exception as exc:
+        logger.debug("Intermediate navigation failed: %s", exc)
+    page.wait_for_timeout(random.uniform(1000, 2000))
+
     try:
         resp = page.goto(
             "https://www.truepeoplesearch.com/",
@@ -388,6 +434,7 @@ def search_truepeoplesearch(
     if resp and resp.status >= 400:
         logger.error("Access denied on initial page: %s", resp.status)
         page.screenshot(path="logs/access_denied_start.png")
+    page.wait_for_timeout(random.uniform(800, 1500))
     random_mouse_movement(page)
 
     try:
@@ -446,6 +493,7 @@ def search_truepeoplesearch(
     if debug:
         Path("logs").mkdir(exist_ok=True)
         Path("logs/page_after_submit.html").write_text(html)
+    check_for_cloudflare(page, html, "https://www.truepeoplesearch.com/")
 
     lower_html = html.lower()
 
