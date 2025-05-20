@@ -25,8 +25,11 @@ Optional flags:
   uses a Decodo residential proxy configured in `skiptracer.py`.
 - `--fast` – Include FastPeopleSearch (may trigger bot checks)
 - `--save` – Write results to `results.json`
+- `--parallel N` – Run N browser contexts in parallel using separate proxies
 
 Use `--debug` to print verbose logs and save the last HTML response when a request fails or is blocked.
+
+When running with `--parallel`, multiple browser contexts use separate proxies simultaneously. Each proxy's success rate and failures are logged so poor performers can be cooled down automatically.
 
 ## Output Format
 
