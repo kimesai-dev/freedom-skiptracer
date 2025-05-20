@@ -127,6 +127,100 @@ MOBILE_PROXIES = [
 PROXIES = RESIDENTIAL_PROXIES
 
 
+# Maximum concurrent browser contexts.
+MAX_PARALLEL_CONTEXTS = 5
+# Initial percentage of mobile proxies to allocate.
+INITIAL_MOBILE_RATIO = 0.3
+
+from dataclasses import dataclass, field
+import threading
+
+
+@dataclass
+class ProxyStats:
+    """Runtime statistics for a single proxy."""
+
+    success: int = 0
+    failure: int = 0
+    blocks: int = 0
+    times: list = field(default_factory=list)
+
+
+class ParallelProxyManager:
+    """Smart proxy allocator for concurrent workers."""
+
+    def __init__(self, residential: List[str], mobile: List[str]):
+        self.residential = residential[:]
+        self.mobile = mobile[:]
+        self.lock = threading.Lock()
+        self.res_index = 0
+        self.mob_index = 0
+        self.mobile_ratio = INITIAL_MOBILE_RATIO
+        self.in_use: set[str] = set()
+        self.stats = {p: ProxyStats() for p in residential + mobile}
+
+    def _next_from_pool(self, pool: List[str], idx: int) -> tuple[str | None, int]:
+        if not pool:
+            return None, idx
+        start = idx
+        while True:
+            if idx >= len(pool):
+                idx = 0
+            proxy = pool[idx]
+            idx += 1
+            if proxy not in self.in_use:
+                self.in_use.add(proxy)
+                return proxy, idx
+            if idx == start:
+                return None, idx
+
+    def allocate(self) -> tuple[str | None, str]:
+        """Return an available proxy and its type."""
+        with self.lock:
+            use_mobile = random.random() < self.mobile_ratio
+            proxy = None
+            ptype = ""
+            if use_mobile:
+                proxy, self.mob_index = self._next_from_pool(self.mobile, self.mob_index)
+                ptype = "mobile"
+            if not proxy:
+                proxy, self.res_index = self._next_from_pool(self.residential, self.res_index)
+                ptype = "residential"
+            if not proxy and not use_mobile:
+                proxy, self.mob_index = self._next_from_pool(self.mobile, self.mob_index)
+                ptype = "mobile"
+            if proxy:
+                logger.info("[CTX] Allocated %s proxy %s", ptype, proxy)
+            return proxy, ptype
+
+    def release(self, proxy: str, ptype: str, success: bool, blocked: bool, duration: float) -> None:
+        """Return proxy to pool and update health metrics."""
+        with self.lock:
+            if proxy in self.in_use:
+                self.in_use.remove(proxy)
+            stat = self.stats.get(proxy)
+            if stat:
+                stat.times.append(duration)
+                if success:
+                    stat.success += 1
+                else:
+                    stat.failure += 1
+                if blocked:
+                    stat.blocks += 1
+            if ptype == "residential" and not success:
+                self.mobile_ratio = min(0.7, self.mobile_ratio + 0.05)
+            elif ptype == "residential" and success:
+                self.mobile_ratio = max(INITIAL_MOBILE_RATIO, self.mobile_ratio - 0.02)
+            logger.info(
+                "[CTX] Released %s proxy %s success=%s blocked=%s ratio=%.2f",
+                ptype,
+                proxy,
+                success,
+                blocked,
+                self.mobile_ratio,
+            )
+
+
 class ProxyRotator:
     """Rotate residential proxies first, then mobile on repeated failures."""
 
@@ -910,6 +1004,127 @@ def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -
 
     return results, bot_check
 
+
+def run_sequential(p, args) -> List[Dict[str, object]]:
+    """Original single-context execution preserved."""
+    rotator = ProxyRotator([args.proxy] if args.proxy else RESIDENTIAL_PROXIES, MOBILE_PROXIES)
+    results: List[Dict[str, object]] = []
+    bot_block = True
+
+    while bot_block:
+        proxy, ptype = rotator.next_proxy()
+        if proxy is None:
+            logger.error("All proxies exhausted without bypassing bot protection")
+            break
+
+        browser, context = create_context(p, args.visible, proxy)
+
+        try:
+            res, bot_block = search_truepeoplesearch(
+                context,
+                args.address,
+                args.debug,
+                args.inspect,
+                args.visible,
+                args.manual,
+            )
+            results.extend(res)
+
+            if args.fast and not bot_block:
+                res2, bot2 = search_fastpeoplesearch(
+                    context,
+                    args.address,
+                    args.debug,
+                    args.inspect,
+                )
+                results.extend(res2)
+                bot_block = bot_block or bot2
+            if bot_block:
+                rotator.record_failure("bot detection")
+            else:
+                rotator.record_success()
+
+        except Exception as exc:
+            bot_block = True
+            rotator.record_failure(str(exc))
+            if args.debug:
+                print(f"Search error: {exc}")
+
+        context.close()
+        browser.close()
+
+        if bot_block:
+            logger.warning("Bot protection triggered, rotating proxy")
+
+    return results
+
+
+def _worker(ctx_id: int, manager: ParallelProxyManager, args, results: list, stop: threading.Event) -> None:
+    """Worker function for parallel contexts."""
+    while not stop.is_set():
+        proxy, ptype = manager.allocate()
+        if not proxy:
+            logger.warning("Worker %d found no available proxy", ctx_id)
+            return
+        start = time.time()
+        blocked = False
+        success = False
+        try:
+            with sync_playwright() as p:
+                browser, context = create_context(p, args.visible, proxy)
+                res, bot_block = search_truepeoplesearch(
+                    context,
+                    args.address,
+                    args.debug,
+                    args.inspect,
+                    args.visible,
+                    args.manual,
+                )
+                if args.fast and not bot_block:
+                    res2, bot2 = search_fastpeoplesearch(
+                        context,
+                        args.address,
+                        args.debug,
+                        args.inspect,
+                    )
+                    res.extend(res2)
+                    bot_block = bot_block or bot2
+                success = not bot_block
+                blocked = bot_block
+                if success:
+                    results.extend(res)
+                    stop.set()
+        except Exception as exc:
+            logger.error("Worker %d error %s", ctx_id, exc)
+            blocked = True
+        finally:
+            duration = time.time() - start
+            manager.release(proxy, ptype, success, blocked, duration)
+        if success or stop.is_set():
+            return
+
+
+def run_parallel(args) -> List[Dict[str, object]]:
+    """Launch multiple browser contexts concurrently using separate proxies."""
+    manager = ParallelProxyManager(
+        [args.proxy] if args.proxy else RESIDENTIAL_PROXIES,
+        MOBILE_PROXIES,
+    )
+    results: List[Dict[str, object]] = []
+    stop = threading.Event()
+    threads = []
+
+    worker_count = min(MAX_PARALLEL_CONTEXTS, args.parallel)
+    for i in range(worker_count):
+        t = threading.Thread(target=_worker, args=(i + 1, manager, args, results, stop), daemon=True)
+        threads.append(t)
+        t.start()
+
+    for t in threads:
+        t.join()
+
+    return results
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Autonomous skip tracing tool")
     parser.add_argument("address", help="Property address")
@@ -921,61 +1136,24 @@ def main() -> None:
     parser.add_argument("--manual", action="store_true", help="Pause on bot wall for manual solve")
 
     parser.add_argument("--save", action="store_true", help="Write results to results.json")
+    parser.add_argument(
+        "--parallel",
+        type=int,
+        default=0,
+        help="Number of parallel browser contexts to run",
+    )
     args = parser.parse_args()
 
     if args.debug:
         logger.setLevel(logging.DEBUG)
         logger.debug("Debug logging enabled")
 
-    with sync_playwright() as p:
-        rotator = ProxyRotator([args.proxy] if args.proxy else RESIDENTIAL_PROXIES, MOBILE_PROXIES)
-        results: List[Dict[str, object]] = []
-        bot_block = True
-
-        while bot_block:
-            proxy, ptype = rotator.next_proxy()
-            if proxy is None:
-                logger.error("All proxies exhausted without bypassing bot protection")
-                break
-
-            browser, context = create_context(p, args.visible, proxy)
-
-            try:
-                res, bot_block = search_truepeoplesearch(
-                    context,
-                    args.address,
-                    args.debug,
-                    args.inspect,
-                    args.visible,
-                    args.manual,
-                )
-                results.extend(res)
-
-                if args.fast and not bot_block:
-                    res2, bot2 = search_fastpeoplesearch(
-                        context,
-                        args.address,
-                        args.debug,
-                        args.inspect,
-                    )
-                    results.extend(res2)
-                    bot_block = bot_block or bot2
-                if bot_block:
-                    rotator.record_failure("bot detection")
-                else:
-                    rotator.record_success()
-
-            except Exception as exc:
-                bot_block = True
-                rotator.record_failure(str(exc))
-                if args.debug:
-                    print(f"Search error: {exc}")
-
-            context.close()
-            browser.close()
-
-            if bot_block:
-                logger.warning("Bot protection triggered, rotating proxy")
+    results: List[Dict[str, object]] = []
+    if args.parallel and args.parallel > 1:
+        results = run_parallel(args)
+    else:
+        with sync_playwright() as p:
+            results = run_sequential(p, args)
 
     if args.save:
         Path("results.json").write_text(json.dumps(results, indent=2))
