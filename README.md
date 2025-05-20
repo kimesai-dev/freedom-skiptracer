@@ -21,7 +21,8 @@ Optional flags:
 
 - `--debug` – Save the last HTML response to `logs/debug_last.html`
 - `--visible` – Launch the browser in non-headless mode
-- `--proxy URL` – Launch the browser using a proxy (e.g., `http://user:pass@host:port`)
+- `--proxy URL` – Launch the browser using a proxy. By default the script
+  uses a Decodo residential proxy configured in `skiptracer.py`.
 - `--fast` – Include FastPeopleSearch (may trigger bot checks)
 - `--save` – Write results to `results.json`
 
