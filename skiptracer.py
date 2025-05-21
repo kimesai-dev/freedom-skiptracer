@@ -460,7 +460,7 @@ def save_debug_html(html: str, name: str = "debug_last.html") -> None:
     Path("logs").mkdir(exist_ok=True)
     Path(f"logs/{name}").write_text(html)
 
-def check_for_cloudflare(page, html: str, url: str) -> None:
+def check_for_cloudflare(page, html: str, url: str) -> bool:
     """Detect Cloudflare block pages and capture a screenshot."""
     lower = html.lower()
     if "you have been blocked" in lower or "cloudflare" in lower:
@@ -468,7 +468,9 @@ def check_for_cloudflare(page, html: str, url: str) -> None:
         ts = int(time.time())
         screenshot = f"logs/cloudflare_{ts}.png"
         page.screenshot(path=screenshot)
-        logger.warning("Cloudflare block detected at %s, screenshot %s", url, screenshot)
+        logger.warning("[DETECT] Cloudflare block page at %s screenshot %s", url, screenshot)
+        return True
+    return False
 
 def check_security_service(page, html: str, url: str) -> bool:
     """Detect generic security service block pages."""
@@ -531,6 +533,14 @@ def detect_turnstile(page, html: str, url: str) -> bool:
 
 def handle_js_challenge(page, timeout: int = 15000) -> bool:
     """Wait for Cloudflare JS challenge to complete."""
+    try:
+        page.wait_for_selector("#cf-spinner-please-wait", timeout=3000)
+        logger.info("Waiting for Cloudflare challenge spinner")
+        page.wait_for_selector("#cf-success", timeout=timeout)
+        page.wait_for_load_state("networkidle", timeout=timeout)
+        return True
+    except Exception:
+        pass
     try:
         locator = page.locator("text=Checking your browser before accessing")
         if locator.first.is_visible(timeout=3000):
@@ -606,12 +616,20 @@ def apply_stealth(page) -> None:
         Object.defineProperty(navigator, 'deviceMemory', {{ get: () => {dev_mem} }});
         Object.defineProperty(navigator, 'platform', {{ get: () => '{platform}' }});
 
+        Object.defineProperty(navigator, 'clipboard', {{
+            get: () => ({
+                readText: () => Promise.reject(new DOMException('Denied', 'NotAllowedError')),
+                writeText: () => Promise.resolve()
+            })
+        }});
+
         const originalQuery = navigator.permissions.query;
-        navigator.permissions.__proto__.query = parameters => (
-            parameters.name === 'notifications'
-                ? Promise.resolve({{ state: Notification.permission }})
-                : originalQuery.call(navigator.permissions, parameters)
-        );
+        navigator.permissions.__proto__.query = p => {{
+            if (['notifications','clipboard-read','clipboard-write'].includes(p.name)) {{
+                return Promise.resolve({{ state: 'granted' }});
+            }}
+            return originalQuery.call(navigator.permissions, p);
+        }};
 
         Object.defineProperty(navigator, 'connection', {{ get: () => ({
             rtt: Math.floor(Math.random() * 100) + 50,
@@ -624,6 +642,14 @@ def apply_stealth(page) -> None:
             if (param === 37445) return 'Intel Inc.';
             if (param === 37446) return 'Intel Iris OpenGL Engine';
             return getParameter.call(this, param);
+        }};
+        const origGetChannelData = AudioBuffer.prototype.getChannelData;
+        AudioBuffer.prototype.getChannelData = function() {{
+            const data = origGetChannelData.apply(this, arguments);
+            for (let i = 0; i < data.length; i += 100) {{
+                data[i] = data[i] + Math.random() * 0.00001;
+            }}
+            return data;
         }};
         const toDataURL = HTMLCanvasElement.prototype.toDataURL;
         HTMLCanvasElement.prototype.toDataURL = function() {{ return 'data:image/png;base64,AAAA'; }};
@@ -825,6 +851,24 @@ def intercept_beacon(context) -> None:
 
     context.route("https://static.cloudflareinsights.com/beacon.min.js", handler)
 
+def hide_proxy_headers(context) -> None:
+    """Strip headers that reveal proxy usage."""
+    def handler(route, request) -> None:
+        headers = {
+            k: v
+            for k, v in request.headers.items()
+            if k.lower() not in (
+                "proxy-authorization",
+                "proxy-connection",
+                "via",
+                "x-forwarded-for",
+                "x-real-ip",
+            )
+        }
+        route.continue_(headers=headers)
+
+    context.route("**/*", handler)
+
 def create_context(p, visible: bool, proxy: str | None) -> tuple:
     """Launch a browser with randomized context settings."""
 
@@ -870,6 +914,7 @@ def create_context(p, visible: bool, proxy: str | None) -> tuple:
     stealth_sync(context)
     reset_storage(context)
     intercept_beacon(context)
+    hide_proxy_headers(context)
     logger.debug(
         "Context UA=%s TZ=%s Lang=%s headers=%s",
         ua,
@@ -916,7 +961,9 @@ def fetch_html(context, url: str, debug: bool) -> str:
     if debug:
         save_debug_html(html)
         logger.debug(f"Saved debug HTML for {url}")
-    check_for_cloudflare(page, html, url)
+    if check_for_cloudflare(page, html, url):
+        page.close()
+        raise RuntimeError("CLOUDFLARE_BLOCK")
     if check_white_screen(page, html, url):
         page.close()
         raise RuntimeError("WHITE_SCREEN")
@@ -1053,7 +1100,9 @@ def search_truepeoplesearch(
     if debug:
         Path("logs").mkdir(exist_ok=True)
         Path("logs/page_after_submit.html").write_text(html)
-    check_for_cloudflare(page, html, "https://www.truepeoplesearch.com/")
+    if check_for_cloudflare(page, html, "https://www.truepeoplesearch.com/"):
+        page.close()
+        return [], True
     if check_white_screen(page, html, "https://www.truepeoplesearch.com/", "div.card"):
         page.close()
         return [], True
@@ -1177,7 +1226,9 @@ def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -
     if debug:
         save_debug_html(html)
 
-    check_for_cloudflare(page, html, url)
+    if check_for_cloudflare(page, html, url):
+        page.close()
+        return [], True
     if check_white_screen(page, html, url, "div.card"):
         page.close()
         return [], True
@@ -1279,7 +1330,9 @@ def run_sequential(p, args) -> List[Dict[str, object]]:
             )
             results.extend(res)
 
-            if args.fast and not bot_block:
+            if args.fast:
+                if bot_block:
+                    logger.info("TPS blocked — trying FastPeopleSearch fallback")
                 res2, bot2 = search_fastpeoplesearch(
                     context,
                     args.address,
@@ -1287,7 +1340,7 @@ def run_sequential(p, args) -> List[Dict[str, object]]:
                     args.inspect,
                 )
                 results.extend(res2)
-                bot_block = bot_block or bot2
+                bot_block = bot_block and bot2
             if bot_block:
                 rotator.record_failure("bot detection")
             else:
@@ -1334,7 +1387,9 @@ def _worker(ctx_id: int, manager: ParallelProxyManager, args, results: list, sto
                     args.visible,
                     args.manual,
                 )
-                if args.fast and not bot_block:
+                if args.fast:
+                    if bot_block:
+                        logger.info("TPS blocked — trying FastPeopleSearch fallback")
                     res2, bot2 = search_fastpeoplesearch(
                         context,
                         args.address,
@@ -1342,7 +1397,7 @@ def _worker(ctx_id: int, manager: ParallelProxyManager, args, results: list, sto
                         args.inspect,
                     )
                     res.extend(res2)
-                    bot_block = bot_block or bot2
+                    bot_block = bot_block and bot2
                 success = not bot_block
                 blocked = bot_block
                 if success:
