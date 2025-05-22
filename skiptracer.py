@@ -58,9 +58,6 @@ logger = logging.getLogger(__name__)
 DEBUG = False
 
 
-def human_delay(a: float = 0.3, b: float = 0.7) -> None:
-    """Sleep for a random duration to mimic human pauses."""
-    time.sleep(random.uniform(a, b))
 
 
 def _normalize_phone(number: str) -> str:
@@ -78,9 +75,6 @@ def random_proxy() -> str:
     return random.choice(MOBILE_PROXIES)
 
 
-def human_delay(min_ms: int = 300, max_ms: int = 800) -> None:
-    """Sleep for a random duration in milliseconds."""
-    time.sleep(random.uniform(min_ms / 1000, max_ms / 1000))
 
 
 def detect_chrome_version() -> int | None:
