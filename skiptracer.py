@@ -58,6 +58,7 @@ logger = logging.getLogger(__name__)
 DEBUG = False
 
 
+
 def _normalize_phone(number: str) -> str:
     digits = re.sub(r"\D", "", number)
     if len(digits) == 10:
@@ -71,6 +72,7 @@ def _parse_phones(text: str):
 
 def random_proxy() -> str:
     return random.choice(MOBILE_PROXIES)
+
 
 
 def detect_chrome_version() -> int | None:
@@ -284,6 +286,7 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
         try:
             location_input.send_keys(Keys.ENTER)
             logger.info("[INFO] ENTER pressed")
+
         except Exception:
             traceback.print_exc()
             if debug:
@@ -303,6 +306,7 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
                 btn = WebDriverWait(driver, 5).until(
                     EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit']"))
                 )
+
 
             btn.click()
             logger.info("[INFO] Search button clicked")
