@@ -293,7 +293,7 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
         # Click the search button next to the inputs
         try:
             btn = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='submit']"))
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit'], input[type='submit']"))
             )
 
             btn.click()
