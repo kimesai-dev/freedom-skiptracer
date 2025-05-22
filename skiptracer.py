@@ -59,7 +59,6 @@ DEBUG = False
 
 
 
-
 def _normalize_phone(number: str) -> str:
     digits = re.sub(r"\D", "", number)
     if len(digits) == 10:
@@ -73,7 +72,6 @@ def _parse_phones(text: str):
 
 def random_proxy() -> str:
     return random.choice(MOBILE_PROXIES)
-
 
 
 
@@ -283,15 +281,17 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
             traceback.print_exc()
             if debug:
                 capture_debug()
-        time.sleep(0.5)
 
+        # Submit the form via ENTER in the second field
         try:
             location_input.send_keys(Keys.ENTER)
             logger.info("[INFO] ENTER pressed")
+
         except Exception:
             traceback.print_exc()
             if debug:
                 capture_debug()
+
         time.sleep(0.5)
 
         human_delay()
@@ -303,9 +303,11 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
                     EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='submit']"))
                 )
             except TimeoutException:
-                btn = WebDriverWait(driver, 10).until(
+                btn = WebDriverWait(driver, 5).until(
                     EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit']"))
                 )
+
+
             btn.click()
             logger.info("[INFO] Search button clicked")
         except ElementClickInterceptedException:
