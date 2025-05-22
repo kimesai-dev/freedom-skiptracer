@@ -15,6 +15,7 @@ import traceback
 import undetected_chromedriver as uc
 from bs4 import BeautifulSoup
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import TimeoutException, ElementClickInterceptedException
@@ -283,9 +284,11 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
         # Blur the field to avoid autocomplete
         try:
             street_input.send_keys(Keys.TAB)
-            logger.info("Focus moved away with TAB")
+            logger.info("[INFO] TAB sent")
         except Exception:
             traceback.print_exc()
+            if debug:
+                capture_debug()
         time.sleep(0.5)
 
         human_delay()
@@ -293,10 +296,10 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
         # Click the search button next to the inputs
         try:
             btn = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit']"))
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='submit']"))
             )
-            logger.info("Submitting search")
             btn.click()
+            logger.info("[INFO] Search button clicked")
         except ElementClickInterceptedException:
             driver.execute_script("arguments[0].click()", btn)
             logger.info("Submitting search via JS")
