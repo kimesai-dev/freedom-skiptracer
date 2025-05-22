@@ -77,6 +77,11 @@ def random_proxy() -> str:
     return random.choice(MOBILE_PROXIES)
 
 
+def human_delay(min_ms: int = 300, max_ms: int = 800) -> None:
+    """Sleep for a random duration in milliseconds."""
+    time.sleep(random.uniform(min_ms / 1000, max_ms / 1000))
+
+
 def detect_chrome_version() -> int | None:
     """Return the installed Chrome major version or None if not found."""
     candidates = [
@@ -192,6 +197,11 @@ def fetch_page(driver, url: str, debug: bool = False) -> str:
     return html
 
 
+def human_delay(min_seconds: float = 1.0, max_seconds: float = 2.5) -> None:
+    """Sleep for a random duration to mimic natural pauses."""
+    time.sleep(random.uniform(min_seconds, max_seconds))
+
+
 def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headless: bool = True) -> list:
     driver = create_driver(proxy, headless=headless)
     clear_storage(driver)
@@ -223,6 +233,7 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
                 EC.element_to_be_clickable((By.CSS_SELECTOR, "a[href*='address']"))
             ).click()
             logger.info("Address search link clicked")
+
         except Exception:
             capture_debug()
             traceback.print_exc()
@@ -261,6 +272,7 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
             WebDriverWait(driver, 10).until(
                 EC.element_to_be_clickable((By.ID, "btnSearch"))
             ).click()
+
             logger.info("Search submitted")
         except Exception:
             capture_debug()
@@ -268,6 +280,7 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
             raise
 
         human_delay()
+
 
         # Wait for results
         try:
