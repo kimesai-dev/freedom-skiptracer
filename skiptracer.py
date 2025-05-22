@@ -258,6 +258,7 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
 
         human_delay()
 
+
         # Wait for the address input
         addr_input = WebDriverWait(driver, 20).until(
             EC.presence_of_element_located((By.ID, "home-input"))
