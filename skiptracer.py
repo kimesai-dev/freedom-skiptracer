@@ -17,7 +17,6 @@ from bs4 import BeautifulSoup
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.common.keys import Keys
 from selenium.common.exceptions import TimeoutException, ElementClickInterceptedException
 
 # List of mobile proxies that must be used
@@ -292,7 +291,7 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
         except Exception:
             traceback.print_exc()
             try:
-                street_input.send_keys(Keys.TAB)
+                driver.execute_script("arguments[0].click()", location_input)
             except Exception:
                 traceback.print_exc()
 
