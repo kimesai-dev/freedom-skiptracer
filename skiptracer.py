@@ -223,6 +223,7 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
             human_delay()
             link.click()
             logger.info("Address search link clicked")
+
         except Exception:
             capture_debug()
             traceback.print_exc()
@@ -246,6 +247,7 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
             for char in address:
                 addr_input.send_keys(char)
                 time.sleep(random.uniform(0.05, 0.15))
+
         except Exception:
             capture_debug()
             traceback.print_exc()
@@ -258,6 +260,7 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
             )
             human_delay()
             driver.find_element(By.ID, "btnSearch").click()
+
             logger.info("Search submitted")
         except Exception:
             capture_debug()
