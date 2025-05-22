@@ -8,6 +8,9 @@ import random
 import re
 import time
 from pathlib import Path
+import subprocess
+import shutil
+import traceback
 
 import undetected_chromedriver as uc
 from bs4 import BeautifulSoup
@@ -50,6 +53,9 @@ PHONE_RE = re.compile(r"\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
+# Global flag toggled by --debug to enable extra logging and HTML capture
+DEBUG = False
+
 
 def _normalize_phone(number: str) -> str:
     digits = re.sub(r"\D", "", number)
@@ -66,20 +72,51 @@ def random_proxy() -> str:
     return random.choice(MOBILE_PROXIES)
 
 
-def create_driver(proxy: str):
-    """Launch a headless Chrome instance with stealth tweaks."""
+def detect_chrome_version() -> int | None:
+    """Return the installed Chrome major version or None if not found."""
+    candidates = [
+        "google-chrome",
+        "chrome",
+        "chromium-browser",
+        "chromium",
+        "google-chrome-stable",
+    ]
+    for cmd in candidates:
+        path = shutil.which(cmd)
+        if not path:
+            continue
+        try:
+            out = subprocess.check_output([path, "--version"], stderr=subprocess.STDOUT)
+            match = re.search(r"(\d+)\.", out.decode())
+            if match:
+                return int(match.group(1))
+        except Exception:
+            continue
+    return None
+
+
+def create_driver(proxy: str, headless: bool = True):
+    """Launch Chrome with stealth tweaks and optional proxy."""
     ua = random.choice(USER_AGENTS)
     lang = random.choice(LANGUAGES)
     options = uc.ChromeOptions()
-    options.add_argument("--headless=new")
+    if headless:
+        options.add_argument("--headless=new")
     options.add_argument("--incognito")
     options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--start-maximized")
     options.add_argument(f"--user-agent={ua}")
     options.add_argument(f"--lang={lang}")
     if proxy:
         options.add_argument(f"--proxy-server={proxy}")
-
-    driver = uc.Chrome(options=options)
+    version = detect_chrome_version()
+    try:
+        driver = uc.Chrome(options=options, version_main=version)
+    except Exception:
+        traceback.print_exc()
+        raise
     width = random.randint(800, 1366)
     height = random.randint(600, 900)
     driver.set_window_size(width, height)
@@ -122,23 +159,29 @@ def save_debug(html: str, name: str = "debug_last.html"):
     Path(f"logs/{name}").write_text(html)
 
 
-def fetch_page(driver, url: str) -> str:
-    driver.get(url)
+def fetch_page(driver, url: str, debug: bool = False) -> str:
+    try:
+        driver.get(url)
+    except Exception:
+        traceback.print_exc()
+        raise
     html = driver.page_source
-    save_debug(html)
+    if debug:
+        save_debug(html)
     lower = html.lower()
     if "cloudflare" in lower and ("attention" in lower or "blocked" in lower):
-        save_debug(html, f"blocked_{int(time.time())}.html")
+        if debug:
+            save_debug(html, f"blocked_{int(time.time())}.html")
         raise RuntimeError("Cloudflare block detected")
     return html
 
 
-def search_truepeoplesearch(address: str, proxy: str) -> list:
-    driver = create_driver(proxy)
+def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headless: bool = True) -> list:
+    driver = create_driver(proxy, headless=headless)
     clear_storage(driver)
     results = []
     try:
-        fetch_page(driver, "https://www.truepeoplesearch.com/")
+        fetch_page(driver, "https://www.truepeoplesearch.com/", debug)
         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='Address']"))).click()
         try:
             street, city = [p.strip() for p in address.split(',', 1)]
@@ -154,7 +197,8 @@ def search_truepeoplesearch(address: str, proxy: str) -> list:
 
         WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.CSS_SELECTOR, "div.card")))
         html = driver.page_source
-        save_debug(html)
+        if debug:
+            save_debug(html)
         soup = BeautifulSoup(html, "html.parser")
         for card in soup.select("div.card"):
             name_el = card.select_one("a[href*='/details']")
@@ -172,18 +216,23 @@ def search_truepeoplesearch(address: str, proxy: str) -> list:
 def main():
     parser = argparse.ArgumentParser(description="Search TruePeopleSearch using mobile proxies")
     parser.add_argument("address", help="Address to search")
-    parser.add_argument("--debug", action="store_true", help="Verbose debug logging")
+    parser.add_argument("--debug", action="store_true", help="Save HTML and verbose logs on failure")
+    parser.add_argument("--visible", action="store_true", help="Show browser window")
+    parser.add_argument("--proxy", help="Proxy URL to use instead of random choice")
     args = parser.parse_args()
 
     if args.debug:
         logger.setLevel(logging.DEBUG)
+    global DEBUG
+    DEBUG = args.debug
 
-    proxy = random_proxy()
+    proxy = args.proxy or random_proxy()
     logger.info("Using proxy %s", proxy)
     try:
-        results = search_truepeoplesearch(args.address, proxy)
-    except Exception as exc:
-        logger.error("Search failed: %s", exc)
+        results = search_truepeoplesearch(args.address, proxy, debug=args.debug, headless=not args.visible)
+    except Exception:
+        traceback.print_exc()
+        logger.error("Search failed")
         results = []
 
     print(json.dumps(results, indent=2))
