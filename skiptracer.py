@@ -192,6 +192,11 @@ def fetch_page(driver, url: str, debug: bool = False) -> str:
     return html
 
 
+def human_delay(min_seconds: float = 1.0, max_seconds: float = 2.5) -> None:
+    """Sleep for a random duration to mimic natural pauses."""
+    time.sleep(random.uniform(min_seconds, max_seconds))
+
+
 def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headless: bool = True) -> list:
     driver = create_driver(proxy, headless=headless)
     clear_storage(driver)
@@ -232,6 +237,7 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
             for ch in address:
                 addr_input.send_keys(ch)
                 human_delay(50, 150)
+
         except Exception:
             capture_debug()
             traceback.print_exc()
@@ -244,6 +250,7 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
             )
             human_delay(300, 600)
             search_btn.click()
+
             logger.info("Search submitted")
         except Exception:
             capture_debug()
