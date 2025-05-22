@@ -245,6 +245,21 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
         logger.info("Address search link clicked")
         time.sleep(1)
 
+        # Wait for the address input fields to be visible
+        try:
+            street_input = WebDriverWait(driver, 20).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder*='123 Park Ave']"))
+            )
+            location_input = WebDriverWait(driver, 20).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder*='City']"))
+            )
+            logger.info("Address input fields located")
+        except Exception:
+            traceback.print_exc()
+            if debug:
+                capture_debug()
+            raise
+
         # Accept cookie banner again if it reappears
         try:
             cookie_btn = WebDriverWait(driver, 5).until(
@@ -258,27 +273,44 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
 
         human_delay()
 
+        # Split the full address into street and location
+        parts = address.split(',', 1)
+        street = parts[0].strip()
+        location = parts[1].strip() if len(parts) > 1 else ''
 
-        # Wait for the address input
-        addr_input = WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.ID, "home-input"))
-        )
-        addr_input.clear()
-        addr_input.send_keys(address)
-        logger.info("Address input populated")
+        # Type the street address one character at a time
+        logger.info("Typing street address: %s", street)
+        for ch in street:
+            street_input.send_keys(ch)
+            time.sleep(0.05)
+        logger.info("Street input populated")
+
+        # Type the city/state/zip one character at a time
+        logger.info("Typing location: %s", location)
+        for ch in location:
+            location_input.send_keys(ch)
+            time.sleep(0.05)
+        logger.info("Location input populated")
+
         time.sleep(1)
 
         human_delay()
 
-        # Click the search button
-        btn = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.ID, "btnSearch"))
-        )
+        # Click the search button next to the inputs
         try:
+            btn = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit']"))
+            )
+            logger.info("Submitting search")
             btn.click()
         except ElementClickInterceptedException:
             driver.execute_script("arguments[0].click()", btn)
-        logger.info("Search submitted")
+            logger.info("Submitting search via JS")
+        except Exception:
+            traceback.print_exc()
+            if debug:
+                capture_debug()
+            raise
         time.sleep(1)
 
         human_delay()
