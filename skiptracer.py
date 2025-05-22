@@ -187,6 +187,11 @@ def fetch_page(driver, url: str, debug: bool = False) -> str:
     return html
 
 
+def human_delay(min_seconds: float = 1.0, max_seconds: float = 2.5) -> None:
+    """Sleep for a random duration to mimic natural pauses."""
+    time.sleep(random.uniform(min_seconds, max_seconds))
+
+
 def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headless: bool = True) -> list:
     driver = create_driver(proxy, headless=headless)
     clear_storage(driver)
@@ -210,6 +215,20 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
             traceback.print_exc()
             raise
 
+        # Navigate to the address search form
+        try:
+            link = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "a[href*='address']"))
+            )
+            human_delay()
+            link.click()
+            logger.info("Address search link clicked")
+
+        except Exception:
+            capture_debug()
+            traceback.print_exc()
+            raise
+
         # Wait for the address input
         try:
             addr_input = WebDriverWait(driver, 10).until(
@@ -224,7 +243,11 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
         # Type the full address
         try:
             addr_input.clear()
-            addr_input.send_keys(address)
+            human_delay(0.5, 1.0)
+            for char in address:
+                addr_input.send_keys(char)
+                time.sleep(random.uniform(0.05, 0.15))
+
         except Exception:
             capture_debug()
             traceback.print_exc()
@@ -234,7 +257,10 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
         try:
             WebDriverWait(driver, 10).until(
                 EC.element_to_be_clickable((By.ID, "btnSearch"))
-            ).click()
+            )
+            human_delay()
+            driver.find_element(By.ID, "btnSearch").click()
+
             logger.info("Search submitted")
         except Exception:
             capture_debug()
