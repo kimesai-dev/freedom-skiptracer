@@ -234,14 +234,30 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
 
         human_delay()
 
-        # Click the Address search link to reveal the address form
-        WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, "a[href*='address']"))
-        ).click()
+        # Navigate directly to the address lookup form
+        try:
+            WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "a[href*='address-lookup']"))
+            ).click()
+        except Exception:
+            # Fallback to a direct URL in case the click is intercepted
+            driver.get("https://www.truepeoplesearch.com/address-lookup")
         logger.info("Address search link clicked")
         time.sleep(1)
 
+        # Accept cookie banner again if it reappears
+        try:
+            cookie_btn = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.CLASS_NAME, "cc-btn"))
+            )
+            cookie_btn.click()
+            logger.info("Cookie banner accepted")
+            time.sleep(1)
+        except TimeoutException:
+            pass
+
         human_delay()
+
 
         # Wait for the address input
         addr_input = WebDriverWait(driver, 20).until(
