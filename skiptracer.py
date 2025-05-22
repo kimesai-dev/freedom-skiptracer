@@ -285,12 +285,28 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
             time.sleep(0.05)
         logger.info("Street input populated")
 
+        # Move focus to the location field before typing
+        logger.info("Focusing location input")
+        try:
+            location_input.click()
+        except Exception:
+            traceback.print_exc()
+            try:
+                street_input.send_keys(Keys.TAB)
+            except Exception:
+                traceback.print_exc()
+
         # Type the city/state/zip one character at a time
         logger.info("Typing location: %s", location)
-        for ch in location:
-            location_input.send_keys(ch)
-            time.sleep(0.05)
-        logger.info("Location input populated")
+        try:
+            for ch in location:
+                location_input.send_keys(ch)
+                time.sleep(0.05)
+            logger.info("Location input populated")
+        except Exception:
+            traceback.print_exc()
+            logger.info("Falling back to JS value setter")
+            driver.execute_script("arguments[0].value = arguments[1];", location_input, location)
 
         time.sleep(1)
 
