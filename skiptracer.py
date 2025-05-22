@@ -57,6 +57,11 @@ logger = logging.getLogger(__name__)
 DEBUG = False
 
 
+def human_delay(a: float = 0.3, b: float = 0.7) -> None:
+    """Sleep for a random duration to mimic human pauses."""
+    time.sleep(random.uniform(a, b))
+
+
 def _normalize_phone(number: str) -> str:
     digits = re.sub(r"\D", "", number)
     if len(digits) == 10:
@@ -220,10 +225,26 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
             traceback.print_exc()
             raise
 
+        human_delay()
+
+        # Click the Address search link to reveal the address form
+        try:
+            WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "a[href*='address']"))
+            ).click()
+            logger.info("Address search link clicked")
+
+        except Exception:
+            capture_debug()
+            traceback.print_exc()
+            raise
+
+        human_delay()
+
         # Wait for the address input
         try:
             addr_input = WebDriverWait(driver, 20).until(
-                EC.element_to_be_clickable((By.ID, "home-input"))
+                EC.presence_of_element_located((By.ID, "home-input"))
             )
             logger.info("Address input found")
         except Exception:
@@ -231,31 +252,35 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
             traceback.print_exc()
             raise
 
-        # Type the full address with human-like pauses
+        human_delay()
+
+        # Type the full address slowly to mimic a user
         try:
             addr_input.clear()
             for ch in address:
                 addr_input.send_keys(ch)
-                human_delay(50, 150)
-
+                human_delay(0.05, 0.15)
         except Exception:
             capture_debug()
             traceback.print_exc()
             raise
 
+        human_delay()
+
         # Click the search button
         try:
-            search_btn = WebDriverWait(driver, 10).until(
+            WebDriverWait(driver, 10).until(
                 EC.element_to_be_clickable((By.ID, "btnSearch"))
-            )
-            human_delay(300, 600)
-            search_btn.click()
+            ).click()
 
             logger.info("Search submitted")
         except Exception:
             capture_debug()
             traceback.print_exc()
             raise
+
+        human_delay()
+
 
         # Wait for results
         try:
