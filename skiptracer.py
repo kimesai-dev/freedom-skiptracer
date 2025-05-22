@@ -273,17 +273,11 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
             time.sleep(0.05)
         logger.info("Address typed")
 
-        # Blur the field to avoid autocomplete
+        # Blur the field to avoid autocomplete and confirm the parsed address
         try:
             street_input.send_keys(Keys.TAB)
             logger.info("[INFO] TAB sent")
-        except Exception:
-            traceback.print_exc()
-            if debug:
-                capture_debug()
-
-        # Submit the form via ENTER in the second field
-        try:
+            time.sleep(0.5)
             location_input.send_keys(Keys.ENTER)
             logger.info("[INFO] ENTER pressed")
 
@@ -298,15 +292,9 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
 
         # Click the search button next to the inputs
         try:
-            try:
-                btn = WebDriverWait(driver, 10).until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='submit']"))
-                )
-            except TimeoutException:
-                btn = WebDriverWait(driver, 5).until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit']"))
-                )
-
+            btn = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='submit']"))
+            )
 
             btn.click()
             logger.info("[INFO] Search button clicked")
