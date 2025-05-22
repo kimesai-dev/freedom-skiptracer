@@ -81,8 +81,14 @@ def detect_chrome_version() -> int | None:
         "chromium",
         "google-chrome-stable",
     ]
+
+    # macOS default installation path
+    mac_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    if Path(mac_path).exists():
+        candidates.insert(0, mac_path)
+
     for cmd in candidates:
-        path = shutil.which(cmd)
+        path = shutil.which(cmd) if cmd != mac_path else mac_path
         if not path:
             continue
         try:
@@ -164,6 +170,11 @@ def fetch_page(driver, url: str, debug: bool = False) -> str:
         driver.get(url)
     except Exception:
         traceback.print_exc()
+        if debug:
+            try:
+                save_debug(driver.page_source, f"nav_error_{int(time.time())}.html")
+            except Exception:
+                pass
         raise
     html = driver.page_source
     if debug:
