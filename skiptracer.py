@@ -285,13 +285,27 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
                 capture_debug()
         time.sleep(0.5)
 
+        try:
+            location_input.send_keys(Keys.ENTER)
+            logger.info("[INFO] ENTER pressed")
+        except Exception:
+            traceback.print_exc()
+            if debug:
+                capture_debug()
+        time.sleep(0.5)
+
         human_delay()
 
         # Click the search button next to the inputs
         try:
-            btn = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='submit']"))
-            )
+            try:
+                btn = WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='submit']"))
+                )
+            except TimeoutException:
+                btn = WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit']"))
+                )
             btn.click()
             logger.info("[INFO] Search button clicked")
         except ElementClickInterceptedException:
