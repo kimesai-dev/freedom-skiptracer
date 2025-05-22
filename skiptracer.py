@@ -191,22 +191,66 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
     driver = create_driver(proxy, headless=headless)
     clear_storage(driver)
     results = []
-    try:
-        fetch_page(driver, "https://www.truepeoplesearch.com/", debug)
-        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='Address']"))).click()
+
+    def capture_debug():
+        """Save page HTML and screenshot to help diagnose failures."""
         try:
-            street, city = [p.strip() for p in address.split(',', 1)]
-        except ValueError:
-            street, city = address.strip(), ""
+            Path("debug_page.html").write_text(driver.page_source, encoding="utf-8")
+            driver.save_screenshot("debug_screenshot.png")
+        except Exception:
+            pass
 
-        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder*='Enter name']")))
-        driver.find_element(By.CSS_SELECTOR, "input[placeholder*='Enter name']").send_keys(street)
-        city_input = driver.find_element(By.CSS_SELECTOR, "input[placeholder*='City']")
-        if city:
-            city_input.send_keys(city)
-        city_input.send_keys(Keys.ENTER)
+    try:
+        # Load home page
+        try:
+            fetch_page(driver, "https://www.truepeoplesearch.com/", debug)
+            logger.info("TruePeopleSearch page loaded")
+        except Exception:
+            capture_debug()
+            traceback.print_exc()
+            raise
 
-        WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.CSS_SELECTOR, "div.card")))
+        # Wait for the address input
+        try:
+            addr_input = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.ID, "home-input"))
+            )
+            logger.info("Address input found")
+        except Exception:
+            capture_debug()
+            traceback.print_exc()
+            raise
+
+        # Type the full address
+        try:
+            addr_input.clear()
+            addr_input.send_keys(address)
+        except Exception:
+            capture_debug()
+            traceback.print_exc()
+            raise
+
+        # Click the search button
+        try:
+            WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.ID, "btnSearch"))
+            ).click()
+            logger.info("Search submitted")
+        except Exception:
+            capture_debug()
+            traceback.print_exc()
+            raise
+
+        # Wait for results
+        try:
+            WebDriverWait(driver, 15).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "div.card"))
+            )
+        except Exception:
+            capture_debug()
+            traceback.print_exc()
+            raise
+
         html = driver.page_source
         if debug:
             save_debug(html)
@@ -216,9 +260,18 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
             name = name_el.get_text(strip=True) if name_el else ""
             phones = _parse_phones(card.get_text(" "))
             loc_el = card.find(string=re.compile("Current Address", re.I))
-            city_state = loc_el.find_parent("div").get_text(strip=True) if loc_el else ""
+            city_state = (
+                loc_el.find_parent("div").get_text(strip=True) if loc_el else ""
+            )
             if name or phones:
-                results.append({"name": name, "phones": phones, "city_state": city_state, "source": "TruePeopleSearch"})
+                results.append(
+                    {
+                        "name": name,
+                        "phones": phones,
+                        "city_state": city_state,
+                        "source": "TruePeopleSearch",
+                    }
+                )
     finally:
         driver.quit()
     return results
