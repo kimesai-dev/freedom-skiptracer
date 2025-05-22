@@ -98,43 +98,20 @@ LANGUAGES = [
 # randomness to timings and mouse movement.
 HUMANIZATION_SCALE = 1.0
 
-# Lists of Decodo proxies separated by type for smart rotation
-# Residential proxies are used by default
-RESIDENTIAL_PROXIES = [
-    "http://Sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10001",
-    "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10002",
-    "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10003",
-    "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10004",
-    "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10005",
-    "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10006",
-    "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10007",
-    "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10008",
-    "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10009",
-    "http://sph9k2p5z9:ghI6z+qlegG6h4F8zE@gate.decodo.com:10010",
-]
-
-# Newly provided mobile proxies – used when residential pool is blocked
+# List of mobile proxies to use for all scraping
 MOBILE_PROXIES = [
-    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decodo.com:10001",
-    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decodo.com:10002",
-    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decodo.com:10003",
-    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decodo.com:10004",
-    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decodo.com:10005",
-    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decodo.com:10006",
-    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decodo.com:10007",
-    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decodo.com:10008",
-    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decodo.com:10009",
-    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decodo.com:10010",
+    f"http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decodo.com:{port}"
+    for port in range(10001, 10011)
 ]
 
 # For backwards compatibility with earlier versions
-PROXIES = RESIDENTIAL_PROXIES
+PROXIES = MOBILE_PROXIES
 
 
 # Maximum concurrent browser contexts.
 MAX_PARALLEL_CONTEXTS = 5
-# Initial percentage of mobile proxies to allocate.
-INITIAL_MOBILE_RATIO = 0.3
+# All proxies are mobile, so the ratio is fixed at 1.0
+INITIAL_MOBILE_RATIO = 1.0
 
 # Storage for reusable session cookies keyed by domain
 SESSION_COOKIES: dict[str, list] = {}
@@ -229,64 +206,43 @@ class ProxyStats:
     failure: int = 0
     blocks: int = 0
     times: list = field(default_factory=list)
-    cooldown_until: float = 0.0
-    fail_streak: int = 0
 
 
 class ParallelProxyManager:
-    """Smart proxy allocator for concurrent workers."""
+    """Simple proxy allocator for concurrent workers."""
 
-    def __init__(self, residential: List[str], mobile: List[str]):
-        self.residential = residential[:]
-        self.mobile = mobile[:]
+    def __init__(self, proxies: List[str]):
+        self.proxies = proxies[:]
         self.lock = threading.Lock()
-        self.res_index = 0
-        self.mob_index = 0
-        self.mobile_ratio = INITIAL_MOBILE_RATIO
+        self.index = 0
         self.in_use: set[str] = set()
-        self.stats = {p: ProxyStats() for p in residential + mobile}
+        self.stats = {p: ProxyStats() for p in proxies}
 
-    def _next_from_pool(self, pool: List[str], idx: int) -> tuple[str | None, int]:
-        if not pool:
-            return None, idx
-        start = idx
+    def _next_proxy(self) -> str | None:
+        if not self.proxies:
+            return None
+        start = self.index
         while True:
-            if idx >= len(pool):
-                idx = 0
-            proxy = pool[idx]
-            idx += 1
-            stat = self.stats.get(proxy)
-            if (
-                proxy not in self.in_use
-                and stat
-                and stat.cooldown_until <= time.time()
-            ):
+            if self.index >= len(self.proxies):
+                self.index = 0
+            proxy = self.proxies[self.index]
+            self.index += 1
+            if proxy not in self.in_use:
                 self.in_use.add(proxy)
-                return proxy, idx
-            if idx == start:
-                return None, idx
+                return proxy
+            if self.index == start:
+                return None
 
     def allocate(self) -> tuple[str | None, str]:
-        """Return an available proxy and its type."""
+        """Return an available proxy."""
         with self.lock:
-            use_mobile = random.random() < self.mobile_ratio
-            proxy = None
-            ptype = ""
-            if use_mobile:
-                proxy, self.mob_index = self._next_from_pool(self.mobile, self.mob_index)
-                ptype = "mobile"
-            if not proxy:
-                proxy, self.res_index = self._next_from_pool(self.residential, self.res_index)
-                ptype = "residential"
-            if not proxy and not use_mobile:
-                proxy, self.mob_index = self._next_from_pool(self.mobile, self.mob_index)
-                ptype = "mobile"
+            proxy = self._next_proxy()
             if proxy:
-                logger.info("[CTX] Allocated %s proxy %s", ptype, proxy)
-            return proxy, ptype
+                logger.info("[CTX] Allocated proxy %s", proxy)
+            return proxy, "mobile"
 
     def release(self, proxy: str, ptype: str, success: bool, blocked: bool, duration: float) -> None:
-        """Return proxy to pool and update health metrics."""
+        """Return proxy to pool and update metrics."""
         with self.lock:
             if proxy in self.in_use:
                 self.in_use.remove(proxy)
@@ -295,126 +251,73 @@ class ParallelProxyManager:
                 stat.times.append(duration)
                 if success:
                     stat.success += 1
-                    stat.fail_streak = 0
                 else:
                     stat.failure += 1
-                    stat.fail_streak += 1
                 if blocked:
                     stat.blocks += 1
-                    stat.fail_streak += 1
-                if stat.fail_streak >= 3:
-                    stat.cooldown_until = time.time() + 120
-                    stat.fail_streak = 0
-                    logger.info("[CTX] Cooling down proxy %s for 120s", proxy)
-            if ptype == "residential" and not success:
-                self.mobile_ratio = min(0.7, self.mobile_ratio + 0.05)
-            elif ptype == "residential" and success:
-                self.mobile_ratio = max(INITIAL_MOBILE_RATIO, self.mobile_ratio - 0.02)
             logger.info(
-                "[CTX] Released %s proxy %s success=%s blocked=%s ratio=%.2f",
-                ptype,
+                "[CTX] Released proxy %s success=%s blocked=%s",
                 proxy,
                 success,
                 blocked,
-                self.mobile_ratio,
             )
 
     def log_stats(self) -> None:
-        """Output aggregated proxy health metrics."""
+        """Output aggregated proxy metrics."""
         with self.lock:
             for proxy, stat in self.stats.items():
                 if stat.success or stat.failure:
                     avg = sum(stat.times) / len(stat.times) if stat.times else 0
                     logger.info(
-                        "[STATS] %s succ=%d fail=%d blocks=%d avg_time=%.1fs cooldown=%.0f",
+                        "[STATS] %s succ=%d fail=%d blocks=%d avg_time=%.1fs",
                         proxy,
                         stat.success,
                         stat.failure,
                         stat.blocks,
                         avg,
-                        max(0, stat.cooldown_until - time.time()),
                     )
 
 
 class ProxyRotator:
-    """Rotate residential proxies first, then mobile on repeated failures."""
+    """Simple sequential proxy rotator."""
 
-    def __init__(self, residential: List[str], mobile: List[str]):
-        self.residential = residential
-        self.mobile = mobile
-        self.res_index = 0
-        self.mob_index = 0
-        self.mode = "residential"
-        self.failures = 0
-        self.success = 0
-        self.last_mobile = 0.0
-        self.stats = {p: ProxyStats() for p in residential + mobile}
+    def __init__(self, proxies: List[str]):
+        self.proxies = proxies
+        self.index = 0
+        self.stats = {p: ProxyStats() for p in proxies}
 
-    def _get_proxy(self, pool: List[str], idx: int) -> tuple[Optional[str], int]:
-        if not pool:
-            return None, idx
-        if idx >= len(pool):
-            idx = 0
-        proxy = pool[idx]
-        idx += 1
-        return proxy, idx
+    def _get_proxy(self) -> Optional[str]:
+        if not self.proxies:
+            return None
+        if self.index >= len(self.proxies):
+            self.index = 0
+        proxy = self.proxies[self.index]
+        self.index += 1
+        return proxy
 
     def next_proxy(self) -> tuple[Optional[str], str]:
-        if self.mode == "residential":
-            proxy, self.res_index = self._get_proxy(self.residential, self.res_index)
-            ptype = "residential"
-        else:
-            proxy, self.mob_index = self._get_proxy(self.mobile, self.mob_index)
-            ptype = "mobile"
+        proxy = self._get_proxy()
         if proxy:
-            logger.info("Switching to %s proxy %s", ptype, proxy)
+            logger.info("Switching to proxy %s", proxy)
         else:
-            logger.warning("No %s proxies left to rotate", ptype)
-        return proxy, ptype
+            logger.warning("No proxies left to rotate")
+        return proxy, "mobile"
 
     def record_failure(self, reason: str) -> None:
-        global HUMANIZATION_SCALE
-        self.failures += 1
-        HUMANIZATION_SCALE = min(2.0, HUMANIZATION_SCALE + 0.1)
-        logger.warning(
-            "Proxy failure (%s) count=%d success=%d scale=%.2f mode=%s",
-            reason,
-            self.failures,
-            self.success,
-            HUMANIZATION_SCALE,
-            self.mode,
-        )
-
-        proxy = self.residential[self.res_index - 1] if self.mode == "residential" else self.mobile[self.mob_index - 1]
-        stat = self.stats.get(proxy)
-        if stat:
-            stat.failure += 1
-
-        if self.mode == "residential" and self.failures >= 2:
-            logger.warning("Switching to mobile proxies due to repeated failures")
-            self.mode = "mobile"
-            self.last_mobile = time.time()
-            self.failures = 0
+        proxy = self.proxies[self.index - 1] if self.proxies else None
+        if proxy:
+            stat = self.stats.get(proxy)
+            if stat:
+                stat.failure += 1
+        logger.warning("Proxy failure: %s", reason)
 
     def record_success(self) -> None:
-        global HUMANIZATION_SCALE
-        self.success += 1
-        self.failures = 0
-        HUMANIZATION_SCALE = max(1.0, HUMANIZATION_SCALE - 0.05)
-        if self.mode == "mobile" and time.time() - self.last_mobile > 300:
-            logger.info("Returning to residential proxies after cooldown")
-            self.mode = "residential"
-        logger.info(
-            "Proxy success count=%d failures=%d mode=%s scale=%.2f",
-            self.success,
-            self.failures,
-            self.mode,
-            HUMANIZATION_SCALE,
-        )
-        proxy = self.residential[self.res_index - 1] if self.mode == "residential" else self.mobile[self.mob_index - 1]
-        stat = self.stats.get(proxy)
-        if stat:
-            stat.success += 1
+        proxy = self.proxies[self.index - 1] if self.proxies else None
+        if proxy:
+            stat = self.stats.get(proxy)
+            if stat:
+                stat.success += 1
+        logger.info("Proxy success")
 
     def log_stats(self) -> None:
         for proxy, stat in self.stats.items():
@@ -874,7 +777,7 @@ def create_context(p, visible: bool, proxy: str | None) -> tuple:
 
     launch_args = {"headless": not visible}
     if not proxy:
-        # Randomly select a residential proxy for rotation
+        # Randomly select a mobile proxy for rotation
         proxy = random.choice(PROXIES)
     if proxy:
         cfg = _parse_proxy(proxy)
@@ -931,9 +834,7 @@ def fetch_html(context, url: str, debug: bool) -> str:
     apply_stealth(page)
     random_mouse_movement(page)
     reset_storage(context)
-    restore_cookies(context, "www.truepeoplesearch.com")
     domain = urlsplit(url).netloc
-    restore_cookies(context, domain)
     ua = getattr(context, "_user_agent", random.choice(USER_AGENTS))
     if not is_allowed_by_robots(url, ua):
         logger.warning("Robots.txt disallows %s", url)
@@ -985,7 +886,6 @@ def fetch_html(context, url: str, debug: bool) -> str:
         logger.debug(f"Saved error screenshot {screenshot}")
 
         raise ValueError(f"HTTP {response.status}")
-    store_cookies(context, domain)
     page.close()
     return html
 
@@ -1197,7 +1097,6 @@ def search_truepeoplesearch(
                 "city_state": location,
                 "source": "TruePeopleSearch",
             })
-    store_cookies(context, "www.truepeoplesearch.com")
     page.close()
     return results, bot_check
 
@@ -1211,7 +1110,6 @@ def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -
     page = context.new_page()
     setup_telemetry_logging(page)
     apply_stealth(page)
-    restore_cookies(context, "www.fastpeoplesearch.com")
     replay_telemetry(page, "telemetry.json")
     page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
@@ -1298,7 +1196,6 @@ def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -
                 "city_state": location,
                 "source": "FastPeopleSearch",
             })
-    store_cookies(context, "www.fastpeoplesearch.com")
     page.close()
 
     return results, bot_check
@@ -1306,7 +1203,7 @@ def search_fastpeoplesearch(context, address: str, debug: bool, inspect: bool) -
 
 def run_sequential(p, args) -> List[Dict[str, object]]:
     """Original single-context execution preserved."""
-    rotator = ProxyRotator([args.proxy] if args.proxy else RESIDENTIAL_PROXIES, MOBILE_PROXIES)
+    rotator = ProxyRotator(MOBILE_PROXIES)
     results: List[Dict[str, object]] = []
     bot_block = True
 
@@ -1415,10 +1312,7 @@ def _worker(ctx_id: int, manager: ParallelProxyManager, args, results: list, sto
 
 def run_parallel(args) -> List[Dict[str, object]]:
     """Launch multiple browser contexts concurrently using separate proxies."""
-    manager = ParallelProxyManager(
-        [args.proxy] if args.proxy else RESIDENTIAL_PROXIES,
-        MOBILE_PROXIES,
-    )
+    manager = ParallelProxyManager(MOBILE_PROXIES)
     results: List[Dict[str, object]] = []
     stop = threading.Event()
     threads = []
@@ -1440,10 +1334,8 @@ def main() -> None:
     parser.add_argument("--debug", action="store_true", help="Save HTML and log status codes")
     parser.add_argument("--visible", action="store_true", help="Show browser during scrape")
     parser.add_argument("--inspect", action="store_true", help="Print raw HTML card text")
-    parser.add_argument("--proxy", help="Proxy server e.g. http://user:pass@host:port")
     parser.add_argument("--fast", action="store_true", help="Include FastPeopleSearch")
     parser.add_argument("--manual", action="store_true", help="Pause on bot wall for manual solve")
-    parser.add_argument("--cookie-store", help="Path to persistent cookie store JSON")
 
     parser.add_argument("--save", action="store_true", help="Write results to results.json")
     parser.add_argument(
@@ -1455,8 +1347,6 @@ def main() -> None:
         help="Number of parallel browser contexts to run (default: 5)",
     )
     args = parser.parse_args()
-
-    load_cookie_store(args.cookie_store)
 
     if args.debug:
         logger.setLevel(logging.DEBUG)
@@ -1471,8 +1361,6 @@ def main() -> None:
 
     if args.save:
         Path("results.json").write_text(json.dumps(results, indent=2))
-
-    save_cookie_store(args.cookie_store)
 
     if results:
         print(json.dumps(results, indent=2))
