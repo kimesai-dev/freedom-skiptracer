@@ -18,6 +18,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.keys import Keys
+from selenium.common.exceptions import TimeoutException, ElementClickInterceptedException
 
 # List of mobile proxies that must be used
 MOBILE_PROXIES = [
@@ -217,80 +218,74 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
 
     try:
         # Load home page
+        fetch_page(driver, "https://www.truepeoplesearch.com/", debug)
+        logger.info("TruePeopleSearch page loaded")
+
+        # Accept cookie banner if present
         try:
-            fetch_page(driver, "https://www.truepeoplesearch.com/", debug)
-            logger.info("TruePeopleSearch page loaded")
-        except Exception:
-            capture_debug()
-            traceback.print_exc()
-            raise
+            cookie_btn = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.CLASS_NAME, "cc-btn"))
+            )
+            cookie_btn.click()
+            logger.info("Cookie banner accepted")
+            time.sleep(1)
+        except TimeoutException:
+            pass
 
         human_delay()
 
-        # Click the Address search link to reveal the address form
+        # Navigate directly to the address lookup form
         try:
             WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "a[href*='address']"))
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "a[href*='address-lookup']"))
             ).click()
-            logger.info("Address search link clicked")
-
         except Exception:
-            capture_debug()
-            traceback.print_exc()
-            raise
+            # Fallback to a direct URL in case the click is intercepted
+            driver.get("https://www.truepeoplesearch.com/address-lookup")
+        logger.info("Address search link clicked")
+        time.sleep(1)
+
+        # Accept cookie banner again if it reappears
+        try:
+            cookie_btn = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.CLASS_NAME, "cc-btn"))
+            )
+            cookie_btn.click()
+            logger.info("Cookie banner accepted")
+            time.sleep(1)
+        except TimeoutException:
+            pass
 
         human_delay()
 
         # Wait for the address input
-        try:
-            addr_input = WebDriverWait(driver, 20).until(
-                EC.presence_of_element_located((By.ID, "home-input"))
-            )
-            logger.info("Address input found")
-        except Exception:
-            capture_debug()
-            traceback.print_exc()
-            raise
-
-        human_delay()
-
-        # Type the full address slowly to mimic a user
-        try:
-            addr_input.clear()
-            for ch in address:
-                addr_input.send_keys(ch)
-                human_delay(0.05, 0.15)
-        except Exception:
-            capture_debug()
-            traceback.print_exc()
-            raise
+        addr_input = WebDriverWait(driver, 20).until(
+            EC.presence_of_element_located((By.ID, "home-input"))
+        )
+        addr_input.clear()
+        addr_input.send_keys(address)
+        logger.info("Address input populated")
+        time.sleep(1)
 
         human_delay()
 
         # Click the search button
+        btn = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.ID, "btnSearch"))
+        )
         try:
-            WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.ID, "btnSearch"))
-            ).click()
-
-            logger.info("Search submitted")
-        except Exception:
-            capture_debug()
-            traceback.print_exc()
-            raise
+            btn.click()
+        except ElementClickInterceptedException:
+            driver.execute_script("arguments[0].click()", btn)
+        logger.info("Search submitted")
+        time.sleep(1)
 
         human_delay()
 
-
         # Wait for results
-        try:
-            WebDriverWait(driver, 15).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "div.card"))
-            )
-        except Exception:
-            capture_debug()
-            traceback.print_exc()
-            raise
+        WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "div.card"))
+        )
 
         html = driver.page_source
         if debug:
@@ -313,6 +308,11 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
                         "source": "TruePeopleSearch",
                     }
                 )
+    except Exception:
+        traceback.print_exc()
+        if debug:
+            capture_debug()
+        raise
     finally:
         driver.quit()
     return results
