@@ -273,42 +273,21 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
 
         human_delay()
 
-        # Split the full address into street and location
-        parts = address.split(',', 1)
-        street = parts[0].strip()
-        location = parts[1].strip() if len(parts) > 1 else ''
-
-        # Type the street address one character at a time
-        logger.info("Typing street address: %s", street)
-        for ch in street:
+        # Type the full address in the first input only
+        full_address = address.strip()
+        logger.info("Typing address: %s", full_address)
+        for ch in full_address:
             street_input.send_keys(ch)
             time.sleep(0.05)
-        logger.info("Street input populated")
+        logger.info("Address typed")
 
-        # Move focus to the location field before typing
-        logger.info("Focusing location input")
+        # Blur the field to avoid autocomplete
         try:
-            location_input.click()
+            street_input.send_keys(Keys.TAB)
+            logger.info("Focus moved away with TAB")
         except Exception:
             traceback.print_exc()
-            try:
-                street_input.send_keys(Keys.TAB)
-            except Exception:
-                traceback.print_exc()
-
-        # Type the city/state/zip one character at a time
-        logger.info("Typing location: %s", location)
-        try:
-            for ch in location:
-                location_input.send_keys(ch)
-                time.sleep(0.05)
-            logger.info("Location input populated")
-        except Exception:
-            traceback.print_exc()
-            logger.info("Falling back to JS value setter")
-            driver.execute_script("arguments[0].value = arguments[1];", location_input, location)
-
-        time.sleep(1)
+        time.sleep(0.5)
 
         human_delay()
 
