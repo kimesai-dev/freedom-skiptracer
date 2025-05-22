@@ -1,5 +1,3 @@
-playwright
+undetected-chromedriver
+selenium
 beautifulsoup4
-numpy
-stable-baselines3
-playwright-stealth
