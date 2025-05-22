@@ -58,10 +58,6 @@ logger = logging.getLogger(__name__)
 DEBUG = False
 
 
-def human_delay(a: float = 0.3, b: float = 0.7) -> None:
-    """Sleep for a random duration to mimic human pauses."""
-    time.sleep(random.uniform(a, b))
-
 
 def _normalize_phone(number: str) -> str:
     digits = re.sub(r"\D", "", number)
@@ -77,10 +73,6 @@ def _parse_phones(text: str):
 def random_proxy() -> str:
     return random.choice(MOBILE_PROXIES)
 
-
-def human_delay(min_ms: int = 300, max_ms: int = 800) -> None:
-    """Sleep for a random duration in milliseconds."""
-    time.sleep(random.uniform(min_ms / 1000, max_ms / 1000))
 
 
 def detect_chrome_version() -> int | None:
@@ -288,10 +280,12 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
             time.sleep(0.5)
             location_input.send_keys(Keys.ENTER)
             logger.info("[INFO] ENTER pressed")
+
         except Exception:
             traceback.print_exc()
             if debug:
                 capture_debug()
+
         time.sleep(0.5)
 
         human_delay()
@@ -301,6 +295,7 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
             btn = WebDriverWait(driver, 10).until(
                 EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='submit']"))
             )
+
             btn.click()
             logger.info("[INFO] Search button clicked")
         except ElementClickInterceptedException:
