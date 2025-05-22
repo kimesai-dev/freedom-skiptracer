@@ -72,6 +72,11 @@ def random_proxy() -> str:
     return random.choice(MOBILE_PROXIES)
 
 
+def human_delay(min_ms: int = 300, max_ms: int = 800) -> None:
+    """Sleep for a random duration in milliseconds."""
+    time.sleep(random.uniform(min_ms / 1000, max_ms / 1000))
+
+
 def detect_chrome_version() -> int | None:
     """Return the installed Chrome major version or None if not found."""
     candidates = [
@@ -215,24 +220,10 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
             traceback.print_exc()
             raise
 
-        # Navigate to the address search form
-        try:
-            link = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "a[href*='address']"))
-            )
-            human_delay()
-            link.click()
-            logger.info("Address search link clicked")
-
-        except Exception:
-            capture_debug()
-            traceback.print_exc()
-            raise
-
         # Wait for the address input
         try:
-            addr_input = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.ID, "home-input"))
+            addr_input = WebDriverWait(driver, 20).until(
+                EC.element_to_be_clickable((By.ID, "home-input"))
             )
             logger.info("Address input found")
         except Exception:
@@ -240,13 +231,12 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
             traceback.print_exc()
             raise
 
-        # Type the full address
+        # Type the full address with human-like pauses
         try:
             addr_input.clear()
-            human_delay(0.5, 1.0)
-            for char in address:
-                addr_input.send_keys(char)
-                time.sleep(random.uniform(0.05, 0.15))
+            for ch in address:
+                addr_input.send_keys(ch)
+                human_delay(50, 150)
 
         except Exception:
             capture_debug()
@@ -255,11 +245,11 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
 
         # Click the search button
         try:
-            WebDriverWait(driver, 10).until(
+            search_btn = WebDriverWait(driver, 10).until(
                 EC.element_to_be_clickable((By.ID, "btnSearch"))
             )
-            human_delay()
-            driver.find_element(By.ID, "btnSearch").click()
+            human_delay(300, 600)
+            search_btn.click()
 
             logger.info("Search submitted")
         except Exception:
