@@ -340,6 +340,7 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
         traceback.print_exc()
         if debug:
             capture_debug()
+        logger.error("Search failed")
         raise
     finally:
         driver.quit()
