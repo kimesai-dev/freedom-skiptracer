@@ -24,8 +24,9 @@ Populate `input.csv` with a single column named `Address` and run:
 ```bash
 python skiptracer.py [--request-timeout SECONDS]
 ```
-
-The script will write the scraped name, address, and phone number for each row to `output.csv`.
+Running this command generates an `output.csv` file in the same directory. The
+script writes the scraped name, address, and phone number for each row to this
+file, overwriting any existing content.
 Use `--request-timeout` to change the HTTP timeout, which defaults to 60 seconds.
 
 ## Output Format
