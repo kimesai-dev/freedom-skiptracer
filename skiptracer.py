@@ -49,38 +49,56 @@ class Scraper:
     def __init__(self, timeout: int = 60) -> None:
         self.timeout = timeout
 
-    def fetch(self, url: str) -> str:
-        """Fetch HTML content using Decodo's API."""
+    def fetch(self, url: str, *, visible: bool = False) -> str:
+        """Fetch HTML content using Decodo's API with verbose logging."""
+        print(f"🔍 Requesting URL: {url}")
         auth = (DECODO_USERNAME, DECODO_PASSWORD)
         payload = {
             "url": url,
             "headless": "html",
-            "geo": "us",
-            "locale": "en-US",
-            "device_type": "desktop",
-            "session_id": "skiptracer",
-            "headers": {"User-Agent": "Mozilla/5.0"},
-            "successful_status_codes": [200],
-            "force_headers": True,
+            "geo": "United States",
+            "locale": "en-us",
+            "device_type": "desktop_chrome",
+            "session_id": "Skip 1",
+            "headers": {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                )
+            },
         }
-        logger.info("Sending payload: %s", payload)
-        resp = requests.post(
-            API_URL,
-            auth=auth,
-            json=payload,
-            timeout=self.timeout,
-            headers={"Content-Type": "application/json"},
-        )
-        logger.info("Response status: %s", resp.status_code)
-        resp.raise_for_status()
-        html = ""
-        if "application/json" in resp.headers.get("Content-Type", ""):
-            data = resp.json()
-            html = data.get("content") or data.get("html") or data.get("result") or ""
-        else:
-            html = resp.text
-        time.sleep(DELAY_SECONDS)
-        return html
+        try:
+            print("📡 Sending POST request...")
+            print(f"📡 Payload: {payload}")
+            resp = requests.post(
+                API_URL,
+                auth=auth,
+                json=payload,
+                timeout=self.timeout,
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                },
+            )
+            print("✅ POST request completed")
+            print(f"📌 Status Code: {resp.status_code}")
+            resp.raise_for_status()
+            html = ""
+            if "application/json" in resp.headers.get("Content-Type", ""):
+                data = resp.json()
+                html = data.get("content") or data.get("html") or data.get("result") or ""
+            else:
+                html = resp.text
+            preview = html if visible else html[:500]
+            print(preview)
+            return html
+        except Exception as exc:
+            print(f"❌ {exc}")
+            raise
+        finally:
+            time.sleep(DELAY_SECONDS)
+
 
 
 def extract_data(html: str) -> Dict[str, str]:
@@ -109,22 +127,30 @@ def extract_data(html: str) -> Dict[str, str]:
     }
 
 
-def scrape_address(address: str, scraper: Scraper) -> Dict[str, str]:
+def scrape_address(address: str, scraper: Scraper, *, visible: bool = False) -> Dict[str, str]:
     """Scrape a single address from TruePeopleSearch."""
     try:
         url_address = quote_plus(address)
         url = f"https://www.truepeoplesearch.com/results?name=&citystatezip={url_address}"
-        html = scraper.fetch(url)
+        html = scraper.fetch(url, visible=visible)
         data = extract_data(html)
     except Exception as exc:
-        return {
+        data = {
             "Input Address": address,
             "Result Name": "",
             "Result Address": "",
             "Phone Number": "",
             "Status": f"Error: {exc}",
         }
-    data["Input Address"] = address
+    else:
+        data["Input Address"] = address
+
+    print(f"📍 Input: {address}")
+    print(f"📄 Name: {data.get('Result Name', '')}")
+    print(f"🏠 Address: {data.get('Result Address', '')}")
+    print(f"📞 Phone: {data.get('Phone Number', '')}")
+    print(f"📌 Status: {data.get('Status', '')}")
+
     return data
 
 
@@ -137,12 +163,17 @@ def main() -> None:
         default=60,
         help="Timeout in seconds for HTTP requests",
     )
+    parser.add_argument(
+        "--visible",
+        action="store_true",
+        help="Print full HTML responses instead of a 500 character preview",
+    )
     args = parser.parse_args()
 
     scraper = Scraper(timeout=args.request_timeout)
     df = pd.read_csv("input.csv")
     results = [
-        scrape_address(addr, scraper)
+        scrape_address(addr, scraper, visible=args.visible)
 
         for addr in df.get("Address", [])
         if isinstance(addr, str)
