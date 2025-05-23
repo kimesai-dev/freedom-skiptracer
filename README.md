@@ -29,6 +29,19 @@ script writes the scraped name, address, and phone number for each row to this
 file, overwriting any existing content.
 Use `--request-timeout` to change the HTTP timeout, which defaults to 60 seconds.
 
+### Decodo API options
+
+The scraper sends a POST request to `https://scraper-api.decodo.com/v2/scrape`.
+The JSON payload specifies the target `url` and sets `headless` to `"html"` so
+Decodo returns the fully rendered HTML. The tool parses this HTML to extract the
+contact information.
+
+Example command with a custom timeout:
+
+```bash
+python skiptracer.py --request-timeout 30
+```
+
 ## Output Format
 
 Each row in `output.csv` contains:
