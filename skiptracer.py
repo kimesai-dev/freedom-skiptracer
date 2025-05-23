@@ -61,13 +61,17 @@ class Scraper:
             "locale": "en-us",
             "device_type": "desktop_chrome",
             "session_id": "Skip 1",
-            "headers": {
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                )
-            },
+            "http_method": "GET",
+        }
+
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
         }
         try:
             print("📡 Sending POST request...")
@@ -77,10 +81,7 @@ class Scraper:
                 auth=auth,
                 json=payload,
                 timeout=self.timeout,
-                headers={
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                },
+                headers=headers,
             )
             print("✅ POST request completed")
             print(f"📌 Status Code: {resp.status_code}")
@@ -91,8 +92,10 @@ class Scraper:
                 html = data.get("content") or data.get("html") or data.get("result") or ""
             else:
                 html = resp.text
-            preview = html if visible else html[:500]
+            preview = html[:500]
             print(preview)
+            if visible:
+                print(html)
             return html
         except Exception as exc:
             print(f"❌ {exc}")
