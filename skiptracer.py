@@ -273,7 +273,16 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
             time.sleep(0.05)
         logger.info("Address typed")
 
-        # Blur the field to avoid autocomplete and confirm the parsed address
+        # Wait for the autocomplete suggestion for the typed address
+        try:
+            WebDriverWait(driver, 5).until(
+                EC.visibility_of_element_located((By.CSS_SELECTOR, ".pac-item"))
+            )
+            logger.info("Address suggestion appeared")
+        except TimeoutException:
+            logger.debug("No suggestion appeared")
+
+        # Confirm the parsed address
         try:
             street_input.send_keys(Keys.TAB)
             logger.info("[INFO] TAB sent")
@@ -288,12 +297,10 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
 
         human_delay()
 
-        # Click the search button next to the inputs
+        # Click the search button by ID
         try:
             btn = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable(
-                    (By.CSS_SELECTOR, "button.btn.btn-primary[type='submit']")
-                )
+                EC.element_to_be_clickable((By.ID, "btnSubmit-m-n"))
             )
             btn.click()
             logger.info("[INFO] Search button clicked")
