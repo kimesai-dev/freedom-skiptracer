@@ -1,3 +1,4 @@
 undetected-chromedriver
 selenium
 beautifulsoup4
+2captcha-python

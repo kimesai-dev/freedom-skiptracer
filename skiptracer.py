@@ -11,6 +11,9 @@ from pathlib import Path
 import subprocess
 import shutil
 import traceback
+import os
+
+from twocaptcha import TwoCaptcha
 
 import undetected_chromedriver as uc
 from bs4 import BeautifulSoup
@@ -55,6 +58,9 @@ SOCKS5_PROXIES = [
 
 ALL_PROXIES = HTTP_PROXIES + SOCKS5_PROXIES
 
+# 2Captcha API key used to solve challenge pages
+TWO_CAPTCHA_API_KEY = os.getenv("2CAPTCHA_API_KEY", "")
+
 # User-Agent and language pools for header rotation
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
@@ -97,6 +103,66 @@ def _normalize_phone(number: str) -> str:
 
 def _parse_phones(text: str):
     return list({_normalize_phone(m) for m in PHONE_RE.findall(text or "")})
+
+
+def solve_captcha(driver, wait_time: int = 120, retries: int = 2) -> bool:
+    """Detect and solve CAPTCHA challenges using 2Captcha."""
+    html = driver.page_source.lower()
+    if (
+        "captcha" not in html
+        and "g-recaptcha" not in html
+        and "hcaptcha" not in html
+        and "turnstile" not in html
+    ):
+        return False
+
+    if not TWO_CAPTCHA_API_KEY:
+        logger.error("CAPTCHA detected but TWO_CAPTCHA_API_KEY is not set")
+        return False
+
+    logger.info("CAPTCHA detected, attempting to solve")
+    soup = BeautifulSoup(driver.page_source, "html.parser")
+    sitekey = None
+    el = soup.find(attrs={"data-sitekey": True})
+    if el:
+        sitekey = el.get("data-sitekey")
+    if not sitekey:
+        match = re.search(r'data-sitekey="([^"]+)"', driver.page_source)
+        if match:
+            sitekey = match.group(1)
+    if not sitekey:
+        logger.error("Could not find sitekey for CAPTCHA")
+        return False
+
+    solver = TwoCaptcha(TWO_CAPTCHA_API_KEY)
+    for attempt in range(retries):
+        try:
+            result = solver.recaptcha(sitekey=sitekey, url=driver.current_url)
+            token = result.get("code")
+            if not token:
+                raise RuntimeError("No token returned")
+            js = """
+                var f = document.querySelector('textarea[name="g-recaptcha-response"], textarea[name="h-captcha-response"], input[name="cf-turnstile-response"]');
+                if (f) { f.style.display=''; f.value = arguments[0]; }
+            """
+            driver.execute_script(js, token)
+            logger.info("CAPTCHA token injected")
+            time.sleep(2)
+            driver.execute_script(
+                "document.querySelector('form').dispatchEvent(new Event('submit',{bubbles:true}));"
+            )
+            WebDriverWait(driver, wait_time).until(
+                lambda d: "captcha" not in d.page_source.lower()
+            )
+            logger.info("CAPTCHA solved successfully")
+            return True
+        except Exception as exc:
+            logger.error(
+                "CAPTCHA solving failed (attempt %s/%s): %s", attempt + 1, retries, exc
+            )
+            time.sleep(5)
+    logger.error("Failed to solve CAPTCHA")
+    return False
 
 
 def random_proxy() -> str:
@@ -207,6 +273,7 @@ def fetch_page(driver, url: str, debug: bool = False) -> str:
         driver.get(url)
         # Wait for Cloudflare challenge delay
         time.sleep(random.uniform(10, 12))
+        solve_captcha(driver)
     except Exception:
         traceback.print_exc()
         if debug:
@@ -216,6 +283,8 @@ def fetch_page(driver, url: str, debug: bool = False) -> str:
                 pass
         raise
     html = driver.page_source
+    if solve_captcha(driver):
+        html = driver.page_source
     if debug:
         save_debug(html)
     lower = html.lower()
@@ -298,10 +367,12 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
                 EC.element_to_be_clickable((By.CSS_SELECTOR, "a[href*='address-lookup']"))
             ).click()
             time.sleep(random.uniform(10, 12))
+            solve_captcha(driver)
         except Exception:
             # Fallback to a direct URL in case the click is intercepted
             driver.get("https://www.truepeoplesearch.com/address-lookup")
             time.sleep(random.uniform(10, 12))
+            solve_captcha(driver)
         logger.info("Address search link clicked")
         time.sleep(1)
         human_mouse_movements(driver)
@@ -374,6 +445,7 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
             )
             btn.click()
             logger.info("[INFO] Search button clicked")
+            solve_captcha(driver)
         except Exception:
             traceback.print_exc()
             if debug:
@@ -387,6 +459,7 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
         WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "div.card"))
         )
+        solve_captcha(driver)
         human_mouse_movements(driver)
         human_scroll(driver)
 
