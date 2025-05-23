@@ -18,13 +18,42 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.common.exceptions import TimeoutException, ElementClickInterceptedException
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.common.exceptions import (
+    TimeoutException,
+    ElementClickInterceptedException,
+    WebDriverException,
+)
+from urllib.parse import urlparse
 
-# List of mobile proxies that must be used
-MOBILE_PROXIES = [
-    f"http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decodo.com:{port}"
-    for port in range(10001, 10011)
+# Proxy lists (HTTP and SOCKS5)
+HTTP_PROXIES = [
+    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decdoc.com:10001",
+    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decdoc.com:10002",
+    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decdoc.com:10003",
+    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decdoc.com:10004",
+    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decdoc.com:10005",
+    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decdoc.com:10006",
+    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decdoc.com:10007",
+    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decdoc.com:10008",
+    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decdoc.com:10009",
+    "http://spo5y5143p:4QrFon=3x9oPmmlC9k@gate.decdoc.com:10010",
 ]
+
+SOCKS5_PROXIES = [
+    "socks5h://user-spo5y5143p-session-1:4QrFon=3x9oPmmlC9k@gate.decdoc.com:7000",
+    "socks5h://user-spo5y5143p-session-2:4QrFon=3x9oPmmlC9k@gate.decdoc.com:7000",
+    "socks5h://user-spo5y5143p-session-3:4QrFon=3x9oPmmlC9k@gate.decdoc.com:7000",
+    "socks5h://user-spo5y5143p-session-4:4QrFon=3x9oPmmlC9k@gate.decdoc.com:7000",
+    "socks5h://user-spo5y5143p-session-5:4QrFon=3x9oPmmlC9k@gate.decdoc.com:7000",
+    "socks5h://user-spo5y5143p-session-6:4QrFon=3x9oPmmlC9k@gate.decdoc.com:7000",
+    "socks5h://user-spo5y5143p-session-7:4QrFon=3x9oPmmlC9k@gate.decdoc.com:7000",
+    "socks5h://user-spo5y5143p-session-8:4QrFon=3x9oPmmlC9k@gate.decdoc.com:7000",
+    "socks5h://user-spo5y5143p-session-9:4QrFon=3x9oPmmlC9k@gate.decdoc.com:7000",
+    "socks5h://user-spo5y5143p-session-10:4QrFon=3x9oPmmlC9k@gate.decdoc.com:7000",
+]
+
+ALL_PROXIES = HTTP_PROXIES + SOCKS5_PROXIES
 
 # User-Agent and language pools for header rotation
 USER_AGENTS = [
@@ -71,7 +100,8 @@ def _parse_phones(text: str):
 
 
 def random_proxy() -> str:
-    return random.choice(MOBILE_PROXIES)
+    """Return a random proxy from the combined pool."""
+    return random.choice(ALL_PROXIES)
 
 
 
@@ -119,7 +149,11 @@ def create_driver(proxy: str, headless: bool = True):
     options.add_argument(f"--user-agent={ua}")
     options.add_argument(f"--lang={lang}")
     if proxy:
-        options.add_argument(f"--proxy-server={proxy}")
+        parsed = urlparse(proxy)
+        scheme = parsed.scheme or "http"
+        scheme = scheme.replace("socks5h", "socks5")
+        proxy_server = f"{scheme}://{parsed.netloc}"
+        options.add_argument(f"--proxy-server={proxy_server}")
     version = detect_chrome_version()
     try:
         driver = uc.Chrome(options=options, version_main=version)
@@ -171,6 +205,8 @@ def save_debug(html: str, name: str = "debug_last.html"):
 def fetch_page(driver, url: str, debug: bool = False) -> str:
     try:
         driver.get(url)
+        # Wait for Cloudflare challenge delay
+        time.sleep(random.uniform(10, 12))
     except Exception:
         traceback.print_exc()
         if debug:
@@ -195,6 +231,34 @@ def human_delay(min_seconds: float = 1.0, max_seconds: float = 2.5) -> None:
     time.sleep(random.uniform(min_seconds, max_seconds))
 
 
+def human_mouse_movements(driver, moves: int = 3) -> None:
+    """Perform small random mouse movements."""
+    try:
+        size = driver.get_window_size()
+        actions = ActionChains(driver)
+        for _ in range(moves):
+            x = random.randint(0, size["width"] - 1)
+            y = random.randint(0, size["height"] - 1)
+            actions.move_by_offset(x, y).perform()
+            time.sleep(random.uniform(0.2, 0.5))
+            actions.move_by_offset(-x, -y).perform()
+    except WebDriverException:
+        pass
+
+
+def human_scroll(driver, scrolls: int = 2) -> None:
+    """Randomly scroll up and down the page."""
+    try:
+        height = driver.execute_script("return document.body.scrollHeight")
+        for _ in range(scrolls):
+            delta = random.randint(200, min(800, height))
+            driver.execute_script(f"window.scrollBy(0, {delta});")
+            time.sleep(random.uniform(0.3, 0.7))
+            driver.execute_script(f"window.scrollBy(0, {-delta});")
+    except WebDriverException:
+        pass
+
+
 def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headless: bool = True) -> list:
     driver = create_driver(proxy, headless=headless)
     clear_storage(driver)
@@ -211,6 +275,8 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
     try:
         # Load home page
         fetch_page(driver, "https://www.truepeoplesearch.com/", debug)
+        human_mouse_movements(driver)
+        human_scroll(driver)
         logger.info("TruePeopleSearch page loaded")
 
         # Accept cookie banner if present
@@ -231,11 +297,15 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
             WebDriverWait(driver, 10).until(
                 EC.element_to_be_clickable((By.CSS_SELECTOR, "a[href*='address-lookup']"))
             ).click()
+            time.sleep(random.uniform(10, 12))
         except Exception:
             # Fallback to a direct URL in case the click is intercepted
             driver.get("https://www.truepeoplesearch.com/address-lookup")
+            time.sleep(random.uniform(10, 12))
         logger.info("Address search link clicked")
         time.sleep(1)
+        human_mouse_movements(driver)
+        human_scroll(driver)
 
         # Wait for the address input fields to be visible
         try:
@@ -270,7 +340,7 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
         logger.info("Typing address: %s", full_address)
         for ch in full_address:
             street_input.send_keys(ch)
-            time.sleep(0.05)
+            time.sleep(random.uniform(0.05, 0.15))
         logger.info("Address typed")
 
         # Wait for the autocomplete suggestion for the typed address
@@ -317,6 +387,8 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
         WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "div.card"))
         )
+        human_mouse_movements(driver)
+        human_scroll(driver)
 
         html = driver.page_source
         if debug:
@@ -350,6 +422,23 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
     return results
 
 
+def search_with_fallback(address: str, proxies: list[str], debug: bool = False, headless: bool = True) -> list:
+    """Try each proxy until one succeeds."""
+    shuffled = list(proxies)
+    random.shuffle(shuffled)
+    last_exc = None
+    for proxy in shuffled:
+        logger.info("Using proxy %s", proxy)
+        try:
+            return search_truepeoplesearch(address, proxy, debug=debug, headless=headless)
+        except Exception as exc:
+            last_exc = exc
+            logger.error("Proxy %s failed: %s", proxy, exc)
+    if last_exc:
+        raise last_exc
+    return []
+
+
 def main():
     parser = argparse.ArgumentParser(description="Search TruePeopleSearch using mobile proxies")
     parser.add_argument("address", help="Address to search")
@@ -363,10 +452,17 @@ def main():
     global DEBUG
     DEBUG = args.debug
 
-    proxy = args.proxy or random_proxy()
-    logger.info("Using proxy %s", proxy)
+    if args.proxy:
+        proxies = [args.proxy]
+    else:
+        proxies = ALL_PROXIES
     try:
-        results = search_truepeoplesearch(args.address, proxy, debug=args.debug, headless=not args.visible)
+        results = search_with_fallback(
+            args.address,
+            proxies,
+            debug=args.debug,
+            headless=not args.visible,
+        )
     except Exception:
         traceback.print_exc()
         logger.error("Search failed")
