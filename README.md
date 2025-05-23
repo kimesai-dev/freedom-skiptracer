@@ -39,19 +39,3 @@ Each row in `output.csv` contains:
 
 Only publicly available information is queried and returned.
 
-## Batch scraping with the Decodo API
-
-The `decodo_batch_scraper.py` script reads addresses from `input.csv` and writes the first
-TruePeopleSearch result to `output.csv`. Create a `.env` file containing your
-Decodo credentials:
-
-```bash
-DECODO_USERNAME=U0000272288
-DECODO_PASSWORD=PW_1afbd74549ff7a4df66653256a992f20b
-```
-
-Run the scraper with:
-
-```bash
-python decodo_batch_scraper.py
-```
