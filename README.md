@@ -10,6 +10,12 @@ Install the dependencies with pip:
 pip install -r requirements.txt
 ```
 
+Set your 2Captcha API key in the environment so CAPTCHA challenges can be solved automatically:
+
+```bash
+export 2CAPTCHA_API_KEY=YOUR_KEY
+```
+
 ## Usage
 
 
