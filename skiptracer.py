@@ -7,6 +7,7 @@ import re
 from typing import Dict
 import argparse
 from urllib.parse import quote_plus
+import logging
 
 import pandas as pd
 import requests
@@ -24,6 +25,9 @@ if not DECODO_USERNAME or not DECODO_PASSWORD:
     )
 API_URL = "https://scraper-api.decodo.com/v2/scrape"
 DELAY_SECONDS = 3
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 PHONE_RE = re.compile(r"\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}")
 
@@ -94,6 +98,7 @@ class Scraper:
             raise
         finally:
             time.sleep(DELAY_SECONDS)
+
 
 
 def extract_data(html: str) -> Dict[str, str]:
