@@ -5,6 +5,7 @@ import os
 import time
 import re
 from typing import Dict
+import argparse
 from urllib.parse import quote_plus
 
 import pandas as pd
@@ -38,20 +39,26 @@ def _parse_phones(text: str):
     return list({_normalize_phone(m) for m in PHONE_RE.findall(text or "")})
 
 
-def fetch_with_decodo(url: str) -> str:
-    """Fetch HTML content using Decodo's API."""
-    auth = (DECODO_USERNAME, DECODO_PASSWORD)
-    payload = {"url": url, "headless": "html"}
-    resp = requests.post(API_URL, auth=auth, json=payload, timeout=60)
-    resp.raise_for_status()
-    html = ""
-    if "application/json" in resp.headers.get("Content-Type", ""):
-        data = resp.json()
-        html = data.get("content") or data.get("html") or data.get("result") or ""
-    else:
-        html = resp.text
-    time.sleep(DELAY_SECONDS)
-    return html
+class Scraper:
+    """Simple helper for fetching pages from Decodo's API."""
+
+    def __init__(self, timeout: int = 60) -> None:
+        self.timeout = timeout
+
+    def fetch(self, url: str) -> str:
+        """Fetch HTML content using Decodo's API."""
+        auth = (DECODO_USERNAME, DECODO_PASSWORD)
+        payload = {"url": url, "headless": "html"}
+        resp = requests.post(API_URL, auth=auth, json=payload, timeout=self.timeout)
+        resp.raise_for_status()
+        html = ""
+        if "application/json" in resp.headers.get("Content-Type", ""):
+            data = resp.json()
+            html = data.get("content") or data.get("html") or data.get("result") or ""
+        else:
+            html = resp.text
+        time.sleep(DELAY_SECONDS)
+        return html
 
 
 def extract_data(html: str) -> Dict[str, str]:
@@ -80,12 +87,12 @@ def extract_data(html: str) -> Dict[str, str]:
     }
 
 
-def scrape_address(address: str) -> Dict[str, str]:
+def scrape_address(address: str, scraper: Scraper) -> Dict[str, str]:
     """Scrape a single address from TruePeopleSearch."""
     try:
         url_address = quote_plus(address)
         url = f"https://www.truepeoplesearch.com/results?name=&citystatezip={url_address}"
-        html = fetch_with_decodo(url)
+        html = scraper.fetch(url)
         data = extract_data(html)
     except Exception as exc:
         return {
@@ -100,8 +107,22 @@ def scrape_address(address: str) -> Dict[str, str]:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Batch skip tracer using Decodo's Web Scraper API")
+    parser.add_argument(
+        "--request-timeout",
+        type=int,
+        default=60,
+        help="Timeout in seconds for HTTP requests",
+    )
+    args = parser.parse_args()
+
+    scraper = Scraper(timeout=args.request_timeout)
     df = pd.read_csv("input.csv")
-    results = [scrape_address(addr) for addr in df.get("Address", []) if isinstance(addr, str)]
+    results = [
+        scrape_address(addr, scraper)
+        for addr in df.get("Address", [])
+        if isinstance(addr, str)
+    ]
     pd.DataFrame(results).to_csv("output.csv", index=False)
 
 

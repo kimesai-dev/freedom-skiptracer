@@ -22,10 +22,11 @@ DECODO_PASSWORD=PW_1afbd74549ff7a4df66653256a992f20b
 Populate `input.csv` with a single column named `Address` and run:
 
 ```bash
-python skiptracer.py
+python skiptracer.py [--request-timeout SECONDS]
 ```
 
 The script will write the scraped name, address, and phone number for each row to `output.csv`.
+Use `--request-timeout` to change the HTTP timeout, which defaults to 60 seconds.
 
 ## Output Format
 
