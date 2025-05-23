@@ -22,13 +22,15 @@ DECODO_PASSWORD=<your password>
 Populate `input.csv` with a single column named `Address` and run:
 
 ```bash
-python skiptracer.py [--request-timeout SECONDS] [--visible]
+python skiptracer.py [--request-timeout SECONDS] [--visible] [--batch-size N]
 ```
 Running this command generates an `output.csv` file in the same directory. The
 script writes the scraped name, address, and phone number for each row to this
 file, overwriting any existing content.
 Use `--request-timeout` to change the HTTP timeout, which defaults to 60 seconds.
 Pass `--visible` to print the full HTML returned by the scraper for each address.
+Set `--batch-size` to send multiple addresses in a single request using
+Decodo's batch API.
 
 ### Decodo API Request
 
@@ -52,10 +54,13 @@ Requests use HTTP basic authentication with the credentials from your `.env` fil
 
 ### Decodo API options
 
-The scraper sends a POST request to `https://scraper-api.decodo.com/v2/scrape`.
-The JSON payload specifies the target `url` and sets `headless` to `"html"` so
-Decodo returns the fully rendered HTML. The tool parses this HTML to extract the
-contact information.
+The scraper normally sends a POST request to
+`https://scraper-api.decodo.com/v2/scrape`. The JSON payload specifies the
+target `url` and sets `headless` to `"html"` so Decodo returns the fully
+rendered HTML. When `--batch-size` is greater than 1, requests are sent to
+`https://scraper-api.decodo.com/v2/task/batch` with a list of tasks so multiple
+addresses can be scraped in a single API call. The tool parses the returned HTML
+to extract the contact information.
 
 Example command with a custom timeout:
 
