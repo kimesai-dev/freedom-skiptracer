@@ -277,9 +277,7 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
         try:
             street_input.send_keys(Keys.TAB)
             logger.info("[INFO] TAB sent")
-            time.sleep(0.5)
-            location_input.send_keys(Keys.ENTER)
-            logger.info("[INFO] ENTER pressed")
+            time.sleep(1)
 
         except Exception:
             traceback.print_exc()
@@ -293,14 +291,12 @@ def search_truepeoplesearch(address: str, proxy: str, debug: bool = False, headl
         # Click the search button next to the inputs
         try:
             btn = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit'], input[type='submit']"))
+                EC.element_to_be_clickable(
+                    (By.CSS_SELECTOR, "button.btn.btn-primary[type='submit']")
+                )
             )
-
             btn.click()
             logger.info("[INFO] Search button clicked")
-        except ElementClickInterceptedException:
-            driver.execute_script("arguments[0].click()", btn)
-            logger.info("Submitting search via JS")
         except Exception:
             traceback.print_exc()
             if debug:
