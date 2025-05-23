@@ -7,6 +7,7 @@ import re
 from typing import Dict
 import argparse
 from urllib.parse import quote_plus
+import logging
 
 import pandas as pd
 import requests
@@ -24,6 +25,9 @@ if not DECODO_USERNAME or not DECODO_PASSWORD:
     )
 API_URL = "https://scraper-api.decodo.com/v2/scrape"
 DELAY_SECONDS = 3
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 PHONE_RE = re.compile(r"\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}")
 
@@ -48,8 +52,26 @@ class Scraper:
     def fetch(self, url: str) -> str:
         """Fetch HTML content using Decodo's API."""
         auth = (DECODO_USERNAME, DECODO_PASSWORD)
-        payload = {"url": url, "headless": "html"}
-        resp = requests.post(API_URL, auth=auth, json=payload, timeout=self.timeout)
+        payload = {
+            "url": url,
+            "headless": "html",
+            "geo": "us",
+            "locale": "en-US",
+            "device_type": "desktop",
+            "session_id": "skiptracer",
+            "headers": {"User-Agent": "Mozilla/5.0"},
+            "successful_status_codes": [200],
+            "force_headers": True,
+        }
+        logger.info("Sending payload: %s", payload)
+        resp = requests.post(
+            API_URL,
+            auth=auth,
+            json=payload,
+            timeout=self.timeout,
+            headers={"Content-Type": "application/json"},
+        )
+        logger.info("Response status: %s", resp.status_code)
         resp.raise_for_status()
         html = ""
         if "application/json" in resp.headers.get("Content-Type", ""):
