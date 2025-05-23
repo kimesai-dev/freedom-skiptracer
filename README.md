@@ -13,8 +13,8 @@ pip install -r requirements.txt
 Create a `.env` file containing your Decodo credentials:
 
 ```bash
-DECODO_USERNAME=U0000272288
-DECODO_PASSWORD=PW_1afbd74549ff7a4df66653256a992f20b
+DECODO_USERNAME=<your username>
+DECODO_PASSWORD=<your password>
 ```
 
 ## Usage
@@ -22,12 +22,33 @@ DECODO_PASSWORD=PW_1afbd74549ff7a4df66653256a992f20b
 Populate `input.csv` with a single column named `Address` and run:
 
 ```bash
-python skiptracer.py [--request-timeout SECONDS]
+python skiptracer.py [--request-timeout SECONDS] [--visible]
 ```
 Running this command generates an `output.csv` file in the same directory. The
 script writes the scraped name, address, and phone number for each row to this
 file, overwriting any existing content.
 Use `--request-timeout` to change the HTTP timeout, which defaults to 60 seconds.
+Pass `--visible` to print the full HTML returned by the scraper for each address.
+
+### Decodo API Request
+
+The scraper sends a POST request to Decodo with options that match the
+following JSON payload:
+
+```json
+{
+  "url": "https://www.truepeoplesearch.com/results?name=&citystatezip=IN+47371",
+  "headless": "html",
+  "geo": "United States",
+  "locale": "en-us",
+  "device_type": "desktop_chrome",
+  "session_id": "Skip 1",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  }
+}
+```
+Requests use HTTP basic authentication with the credentials from your `.env` file.
 
 ## Output Format
 
