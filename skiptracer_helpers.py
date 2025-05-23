@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Batch skip tracer using Decodo's Web Scraper API."""
+"""Utility functions for scraping TruePeopleSearch with Decodo."""
 
 import os
 import time
@@ -7,7 +7,6 @@ import re
 from typing import Dict
 from urllib.parse import quote_plus
 
-import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
@@ -20,6 +19,14 @@ API_URL = "https://scraper-api.decodo.com/v2/scrape"
 DELAY_SECONDS = 3
 
 PHONE_RE = re.compile(r"\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}")
+
+
+def ensure_credentials() -> None:
+    """Ensure Decodo credentials are available."""
+    if not DECODO_USERNAME or not DECODO_PASSWORD:
+        raise RuntimeError(
+            "DECODO_USERNAME and DECODO_PASSWORD must be set in the environment"
+        )
 
 
 def _normalize_phone(number: str) -> str:
@@ -35,6 +42,7 @@ def _parse_phones(text: str):
 
 def fetch_with_decodo(url: str) -> str:
     """Fetch HTML content using Decodo's API."""
+    ensure_credentials()
     auth = (DECODO_USERNAME, DECODO_PASSWORD)
     payload = {"url": url, "headless": "html"}
     resp = requests.post(API_URL, auth=auth, json=payload, timeout=60)
@@ -42,7 +50,12 @@ def fetch_with_decodo(url: str) -> str:
     html = ""
     if "application/json" in resp.headers.get("Content-Type", ""):
         data = resp.json()
-        html = data.get("content") or data.get("html") or data.get("result") or ""
+        html = (
+            data.get("content")
+            or data.get("html")
+            or data.get("result")
+            or ""
+        )
     else:
         html = resp.text
     time.sleep(DELAY_SECONDS)
@@ -92,13 +105,3 @@ def scrape_address(address: str) -> Dict[str, str]:
         }
     data["Input Address"] = address
     return data
-
-
-def main() -> None:
-    df = pd.read_csv("input.csv")
-    results = [scrape_address(addr) for addr in df.get("Address", []) if isinstance(addr, str)]
-    pd.DataFrame(results).to_csv("output.csv", index=False)
-
-
-if __name__ == "__main__":
-    main()

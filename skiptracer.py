@@ -106,6 +106,7 @@ def scrape_address(address: str, scraper: Scraper) -> Dict[str, str]:
     return data
 
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Batch skip tracer using Decodo's Web Scraper API")
     parser.add_argument(
@@ -120,6 +121,7 @@ def main() -> None:
     df = pd.read_csv("input.csv")
     results = [
         scrape_address(addr, scraper)
+
         for addr in df.get("Address", [])
         if isinstance(addr, str)
     ]
