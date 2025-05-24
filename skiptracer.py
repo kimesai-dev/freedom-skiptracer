@@ -31,7 +31,7 @@ HEADERS = {
         "Chrome/120.0.0.0 Safari/537.36"
     )
 }
-PHONE_RE = re.compile(r"\b(\d{3})[\s.-]?(\d{3})[\s.-]?(\d{4})\b")
+PHONE_RE = re.compile(r"\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}")
 
 auth = (DECODO_USERNAME, DECODO_PASSWORD)
 
@@ -42,7 +42,7 @@ def _normalize_phone(number: str) -> str:
     return number
 
 def _parse_phones(text: str) -> List[str]:
-    return list({_normalize_phone(''.join(m)) for m in PHONE_RE.findall(text or "")})
+    return list({_normalize_phone(m) for m in PHONE_RE.findall(text or "")})
 
 def fetch_url(results_url: str, timeout: int = 120, *, visible: bool = False) -> str:
     payload = {
@@ -90,23 +90,32 @@ def fetch_url(results_url: str, timeout: int = 120, *, visible: bool = False) ->
             raise
     raise RuntimeError("Failed to fetch URL")
 
-def parse_html(html: str) -> Dict[str, str]:
+def extract_data(html: str, *, timeout: int = 120, visible: bool = False) -> Dict[str, str]:
+
     soup = BeautifulSoup(html, "html.parser")
-    name_el = soup.find("h1") or soup.select_one("div.result-name")
-    name = name_el.get_text(strip=True) if name_el else ""
-    addr = ""
-    for card in soup.select("div.card"):
-        if "Current Address" in card.get_text():
-            addr = card.get_text(strip=True)
-            break
-    phones = _parse_phones(soup.get_text(" "))
-    phone_str = "; ".join(phones)
-    status = "Success" if any([name, addr, phone_str]) else "No Results"
+    link = soup.select_one('a[href^="/details"]')
+    if not link:
+        return {
+            "Result Name": "",
+            "Result Address": "",
+            "Phone Numbers": "",
+            "Status": "No Results",
+        }
+
+    details_url = "https://www.truepeoplesearch.com" + link.get("href", "")
+    owner_name = link.get_text(strip=True)
+    addr_el = link.find_next("div")
+    owner_addr = addr_el.get_text(strip=True) if addr_el else ""
+
+    details_html = fetch_url(details_url, timeout=timeout, visible=visible)
+    details_soup = BeautifulSoup(details_html, "html.parser")
+    phones = _parse_phones(details_soup.get_text(" "))
+
     return {
-        "Owner Name": name,
-        "Owner Address": addr,
-        "Phone Numbers": phone_str,
-        "Status": status,
+        "Result Name": owner_name,
+        "Result Address": owner_addr,
+        "Phone Numbers": "; ".join(phones),
+        "Status": "Success" if phones else "Partial",
     }
 
 def main() -> None:
@@ -138,18 +147,23 @@ def main() -> None:
                 timeout=args.request_timeout,
                 visible=args.visible,
             )
-            data = parse_html(html)
+            data = extract_data(
+                html,
+
+                timeout=args.request_timeout,
+                visible=args.visible,
+            )
         except Exception as exc:
             data = {
-                "Owner Name": "",
-                "Owner Address": "",
+                "Result Name": "",
+                "Result Address": "",
                 "Phone Numbers": "",
                 "Status": f"Error: {exc}",
             }
         data["Input Address"] = full_addr
         print(f"📍 Input: {full_addr}")
-        print(f"📄 Name: {data.get('Owner Name')}")
-        print(f"🏠 Address: {data.get('Owner Address')}")
+        print(f"📄 Name: {data.get('Result Name')}")
+        print(f"🏠 Address: {data.get('Result Address')}")
         print(f"📞 Phones: {data.get('Phone Numbers')}")
         print(f"📌 Status: {data.get('Status')}")
         results.append(data)
