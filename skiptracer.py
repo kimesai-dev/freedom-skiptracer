@@ -47,7 +47,7 @@ def _parse_phones(text: str):
 class Scraper:
     """Simple helper for fetching pages from Decodo's API."""
 
-    def __init__(self, timeout: int = 60) -> None:
+    def __init__(self, timeout: int = 120) -> None:
         self.timeout = timeout
 
     def fetch(self, url: str, *, visible: bool = False) -> str:
@@ -58,8 +58,8 @@ class Scraper:
             "url": url,
             "headless": "html",
             "http_method": "GET",
-            "geo": "United States",
-            "locale": "en-us",
+            "geo": "us",
+            "locale": "en-US",
             "device_type": "desktop_chrome",
             "session_id": "skip-session-1",
             "browser_actions": [

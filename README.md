@@ -27,7 +27,7 @@ python skiptracer.py [--request-timeout SECONDS] [--visible] [--batch-size N]
 Running this command generates an `output.csv` file in the same directory. The
 script writes the scraped name, address, and phone number for each row to this
 file, overwriting any existing content.
-Use `--request-timeout` to change the HTTP timeout, which defaults to 60 seconds.
+Use `--request-timeout` to change the HTTP timeout, which defaults to 120 seconds.
 Pass `--visible` to print the full HTML returned by the scraper for each address.
 Set `--batch-size` to send multiple addresses in a single request using
 Decodo's batch API.
@@ -41,13 +41,15 @@ following JSON payload:
 {
   "url": "https://www.truepeoplesearch.com/results?name=&citystatezip=IN+47371",
   "headless": "html",
-  "geo": "United States",
-  "locale": "en-us",
+  "http_method": "GET",
+  "geo": "us",
+  "locale": "en-US",
   "device_type": "desktop_chrome",
-  "session_id": "Skip 1",
-  "headers": {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-  }
+  "session_id": "skip-session-1",
+  "browser_actions": [
+    {"type": "scroll_to_bottom", "wait_time_s": 2},
+    {"type": "click", "selector": {"type": "css", "value": ".load-more-button"}, "wait_time_s": 1}
+  ]
 }
 ```
 Requests use HTTP basic authentication with the credentials from your `.env` file.
