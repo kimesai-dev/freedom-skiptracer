@@ -1,6 +1,6 @@
 # freedom-skiptracer
 
-This project provides a simple skip tracing tool powered by Decodo's Web Scraper API. It reads property addresses from `input.csv`, scrapes TruePeopleSearch with JavaScript rendering, and writes the first result to `output.csv`.
+This project provides a simple skip tracing tool powered by Decodo's Web Scraper API. It reads property addresses from `input.csv` and submits each one to Decodo as an asynchronous task that drives TruePeopleSearch with browser automation. The returned HTML is parsed for contact details and written to `output.csv`.
 
 ## Installation
 
@@ -29,20 +29,15 @@ Populate `input.csv` with three columns named `Address`, `City` and
 Run the script with:
 
 ```bash
-python skiptracer.py [--request-timeout SECONDS] [--visible] [--batch-size N]
+python skiptracer.py [--request-timeout SECONDS]
 ```
 Running this command generates an `output.csv` file in the same directory. The
-script writes the scraped name, address, and phone number for each row to this
-file, overwriting any existing content.
-Use `--request-timeout` to change the HTTP timeout, which defaults to 120 seconds.
-Pass `--visible` to print the full HTML returned by the scraper for each address.
-Set `--batch-size` to send multiple addresses in a single request using
-Decodo's batch API.
+script writes the scraped owner name, address, and phone numbers for each row to this
+file, overwriting any existing content. Use `--request-timeout` to change the HTTP timeout, which defaults to 120 seconds.
 
 ### Decodo API Request
 
-The scraper sends a POST request to Decodo with options that match the
-following JSON payload:
+The scraper sends a POST request to Decodo for each address using a payload similar to:
 
 ```json
 {
@@ -54,17 +49,8 @@ following JSON payload:
   "session_id": "skip-session-1"
 }
 ```
-Requests use HTTP basic authentication with the credentials from your `.env` file.
-
-### Decodo API options
-
-The scraper normally sends a POST request to
-`https://scraper-api.decodo.com/v2/scrape`. The JSON payload specifies the
-target `url` and sets `headless` to `"html"` so Decodo returns the fully
-rendered HTML. When `--batch-size` is greater than 1, requests are sent to
-`https://scraper-api.decodo.com/v2/task/batch` with a list of tasks so multiple
-addresses can be scraped in a single API call. The tool parses the returned HTML
-to extract the contact information.
+Requests use HTTP basic authentication with the credentials from your `.env` file. Each
+task is polled until completion using `GET /v2/task/{id}/results`.
 
 Example command with a custom timeout:
 
@@ -77,9 +63,9 @@ python skiptracer.py --request-timeout 30
 Each row in `output.csv` contains:
 
 - Input Address
-- Result Name
-- Result Address
-- Phone Number
+- Owner Name
+- Owner Address
+- Phone Numbers
 - Status
 
 Only publicly available information is queried and returned.
