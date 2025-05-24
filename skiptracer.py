@@ -52,6 +52,8 @@ def fetch_url(results_url: str, timeout: int = 120, *, visible: bool = False) ->
         "geo": "US",
         "locale": "en-US",
         "session_id": "tsp-session-1",
+        "wait_for": "networkidle",
+        "render_wait_time_ms": 6000,
     }
     print(f"📡 Payload: {payload}")
     for attempt in range(3):
@@ -69,16 +71,24 @@ def fetch_url(results_url: str, timeout: int = 120, *, visible: bool = False) ->
                 time.sleep(5)
                 continue
             resp.raise_for_status()
-            data = resp.json() if "application/json" in resp.headers.get("Content-Type", "") else {}
-            html = (
-                data.get("body")
-                or data.get("content")
-                or data.get("html")
-                or data.get("result")
-                or resp.text
+            data = (
+                resp.json()
+                if "application/json" in resp.headers.get("Content-Type", "")
+                else {}
             )
+            html = ""
+            if "results" in data and data["results"]:
+                html = data["results"][0].get("content") or ""
             if not html:
-                print("⚠️  Empty HTML in response!")
+                html = (
+                    data.get("body")
+                    or data.get("content")
+                    or data.get("html")
+                    or data.get("result")
+                    or resp.text
+                )
+            if not html:
+                print("⚠️  Empty HTML")
             if visible:
                 print(html)
             else:
@@ -94,6 +104,13 @@ def fetch_url(results_url: str, timeout: int = 120, *, visible: bool = False) ->
     raise RuntimeError("Failed to fetch URL")
 
 def extract_data(html: str, *, timeout: int = 120, visible: bool = False) -> Dict[str, str]:
+    if not html.strip():
+        return {
+            "Result Name": "",
+            "Result Address": "",
+            "Phone Numbers": "",
+            "Status": "Render Timeout",
+        }
 
     soup = BeautifulSoup(html, "html.parser")
     link = soup.select_one('a[href^="/details"]')

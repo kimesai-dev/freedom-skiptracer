@@ -46,7 +46,9 @@ The scraper sends a POST request to Decodo for each address using a payload simi
   "http_method": "GET",
   "geo": "US",
   "locale": "en-US",
-  "session_id": "skip-session-1"
+  "session_id": "tsp-session-1",
+  "wait_for": "networkidle",
+  "render_wait_time_ms": 6000
 }
 ```
 Requests use HTTP basic authentication with the credentials from your `.env` file. Each
