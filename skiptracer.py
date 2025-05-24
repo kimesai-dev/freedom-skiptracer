@@ -58,18 +58,9 @@ class Scraper:
             "url": url,
             "headless": "html",
             "http_method": "GET",
-            "geo": "us",
+            "geo": "US",
             "locale": "en-US",
-            "device_type": "desktop_chrome",
             "session_id": "skip-session-1",
-            "browser_actions": [
-                {"type": "scroll_to_bottom", "wait_time_s": 2},
-                {
-                    "type": "click",
-                    "selector": {"type": "css", "value": ".load-more-button"},
-                    "wait_time_s": 1,
-                },
-            ],
         }
 
         headers = {
@@ -79,35 +70,60 @@ class Scraper:
                 "Chrome/120.0.0.0 Safari/537.36"
             )
         }
-        try:
-            print("📡 Sending POST request...")
-            print(f"📡 Payload: {payload}")
-            resp = requests.post(
-                API_URL,
-                auth=auth,
-                json=payload,
-                timeout=self.timeout,
-                headers=headers,
-            )
-            print("✅ POST request completed")
-            print(f"📌 Status Code: {resp.status_code}")
-            resp.raise_for_status()
-            html = ""
-            if "application/json" in resp.headers.get("Content-Type", ""):
-                data = resp.json()
-                html = data.get("content") or data.get("html") or data.get("result") or ""
-            else:
-                html = resp.text
-            preview = html[:500]
-            print(preview)
-            if visible:
-                print(html)
-            return html
-        except Exception as exc:
-            print(f"❌ {exc}")
-            raise
-        finally:
-            time.sleep(DELAY_SECONDS)
+
+        for attempt in range(3):
+            try:
+                print("📡 Sending POST request...")
+                print(f"📡 Payload: {payload}")
+                resp = requests.post(
+                    API_URL,
+                    auth=auth,
+                    json=payload,
+                    timeout=self.timeout,
+                    headers=headers,
+                )
+                print("✅ POST request completed")
+                print(f"📌 Status Code: {resp.status_code}")
+
+                if resp.status_code == 429 or resp.status_code >= 500:
+                    if attempt < 2:
+                        backoff = 1 if attempt == 0 else 3
+                        print(
+                            f"⏳ Retry {attempt + 1} in {backoff}s due to status {resp.status_code}"
+                        )
+                        time.sleep(backoff)
+                        continue
+
+                resp.raise_for_status()
+
+                html = ""
+                if "application/json" in resp.headers.get("Content-Type", ""):
+                    data = resp.json()
+                    html = (
+                        data.get("content")
+                        or data.get("html")
+                        or data.get("result")
+                        or ""
+                    )
+                else:
+                    html = resp.text
+
+                preview = html[:500]
+                print(preview)
+                if visible:
+                    print(html)
+                return html
+
+            except Exception as exc:
+                if attempt < 2:
+                    backoff = 1 if attempt == 0 else 3
+                    print(f"❌ {exc} - retrying in {backoff}s")
+                    time.sleep(backoff)
+                    continue
+                print(f"❌ {exc}")
+                raise
+            finally:
+                time.sleep(DELAY_SECONDS)
 
     def fetch_batch(self, urls, *, visible: bool = False):
         """Fetch multiple pages in a single Decodo batch request."""
@@ -245,7 +261,10 @@ def main() -> None:
 
     scraper = Scraper(timeout=args.request_timeout)
     df = pd.read_csv("input.csv")
-    addresses = [addr for addr in df.get("Address", []) if isinstance(addr, str)]
+    addresses = [
+        f"{row['Address']}, {row['City']}, {row['StateZip']}"
+        for _, row in df.iterrows()
+    ]
     results = []
     if args.batch_size > 1:
         for i in range(0, len(addresses), args.batch_size):

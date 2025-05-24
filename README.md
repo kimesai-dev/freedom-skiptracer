@@ -19,7 +19,14 @@ DECODO_PASSWORD=<your password>
 
 ## Usage
 
-Populate `input.csv` with a single column named `Address` and run:
+Populate `input.csv` with three columns named `Address`, `City` and
+`StateZip`. Each row is combined into a single search string in the form:
+
+```
+<Address>, <City>, <StateZip>
+```
+
+Run the script with:
 
 ```bash
 python skiptracer.py [--request-timeout SECONDS] [--visible] [--batch-size N]
@@ -42,14 +49,9 @@ following JSON payload:
   "url": "https://www.truepeoplesearch.com/results?name=&citystatezip=IN+47371",
   "headless": "html",
   "http_method": "GET",
-  "geo": "us",
+  "geo": "US",
   "locale": "en-US",
-  "device_type": "desktop_chrome",
-  "session_id": "skip-session-1",
-  "browser_actions": [
-    {"type": "scroll_to_bottom", "wait_time_s": 2},
-    {"type": "click", "selector": {"type": "css", "value": ".load-more-button"}, "wait_time_s": 1}
-  ]
+  "session_id": "skip-session-1"
 }
 ```
 Requests use HTTP basic authentication with the credentials from your `.env` file.
