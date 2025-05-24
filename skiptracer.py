@@ -47,6 +47,7 @@ def _parse_phones(text: str) -> List[str]:
 def create_task(full_addr: str, timeout: int = 120) -> str:
     payload = {
         "url": "https://www.truepeoplesearch.com",
+        "target": "universal",
         "headless": "html",
         "http_method": "GET",
         "geo": "US",
@@ -54,8 +55,8 @@ def create_task(full_addr: str, timeout: int = 120) -> str:
         "session_id": "tsp-session-1",
         "browser_actions": [
             {
-                "type": "type",
-                "selector": {"type": "css", "value": "#inputAddress"},
+                "type": "input",
+                "selector": {"type": "css", "value": "#search"},
                 "text": full_addr,
             },
             {
@@ -66,8 +67,8 @@ def create_task(full_addr: str, timeout: int = 120) -> str:
             {
                 "type": "click",
                 "selector": {
-                    "type": "css",
-                    "value": "a[href*='/details']:first-of-type",
+                    "type": "xpath",
+                    "value": "(//a[contains(@href,'/details')])[1]",
                 },
                 "wait_time_s": 2,
             },
