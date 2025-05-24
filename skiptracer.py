@@ -91,6 +91,7 @@ def fetch_url(results_url: str, timeout: int = 120, *, visible: bool = False) ->
     raise RuntimeError("Failed to fetch URL")
 
 def extract_data(html: str, *, timeout: int = 120, visible: bool = False) -> Dict[str, str]:
+
     soup = BeautifulSoup(html, "html.parser")
     link = soup.select_one('a[href^="/details"]')
     if not link:
@@ -148,6 +149,7 @@ def main() -> None:
             )
             data = extract_data(
                 html,
+
                 timeout=args.request_timeout,
                 visible=args.visible,
             )
