@@ -52,23 +52,24 @@ def create_task(full_addr: str, timeout: int = 120) -> str:
         "http_method": "GET",
         "geo": "US",
         "locale": "en-US",
+        "device_type": "desktop_chrome",
         "session_id": "tsp-session-1",
         "browser_actions": [
             {
                 "type": "input",
-                "selector": {"type": "css", "value": "#search"},
+                "selector": {"type": "css", "query": "#search"},
                 "text": full_addr,
             },
             {
                 "type": "click",
-                "selector": {"type": "css", "value": "#btnSearch"},
+                "selector": {"type": "css", "query": "#btnSearch"},
                 "wait_time_s": 2,
             },
             {
                 "type": "click",
                 "selector": {
                     "type": "xpath",
-                    "value": "(//a[contains(@href,'/details')])[1]",
+                    "query": "(//a[contains(@href,'/details')])[1]",
                 },
                 "wait_time_s": 2,
             },
