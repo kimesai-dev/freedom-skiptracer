@@ -57,21 +57,27 @@ class Scraper:
         payload = {
             "url": url,
             "headless": "html",
+            "http_method": "GET",
             "geo": "United States",
             "locale": "en-us",
             "device_type": "desktop_chrome",
-            "session_id": "Skip 1",
-            "http_method": "GET",
+            "session_id": "skip-session-1",
+            "browser_actions": [
+                {"type": "scroll_to_bottom", "wait_time_s": 2},
+                {
+                    "type": "click",
+                    "selector": {"type": "css", "value": ".load-more-button"},
+                    "wait_time_s": 1,
+                },
+            ],
         }
 
         headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/120.0.0.0 Safari/537.36"
-            ),
+            )
         }
         try:
             print("📡 Sending POST request...")
