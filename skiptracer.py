@@ -71,11 +71,14 @@ def fetch_url(results_url: str, timeout: int = 120, *, visible: bool = False) ->
             resp.raise_for_status()
             data = resp.json() if "application/json" in resp.headers.get("Content-Type", "") else {}
             html = (
-                data.get("content")
+                data.get("body")
+                or data.get("content")
                 or data.get("html")
                 or data.get("result")
-                or ""
+                or resp.text
             )
+            if not html:
+                print("⚠️  Empty HTML in response!")
             if visible:
                 print(html)
             else:
@@ -136,7 +139,11 @@ def main() -> None:
     df = pd.read_csv("input.csv")
     results = []
     for _, row in df.iterrows():
-        full_addr = f"{row['Address']}, {row['City']}, {row['StateZip']}"
+        raw_addr = row["Address"].strip()
+        raw_city = row["City"].strip()
+        raw_zip = row["StateZip"].strip()
+        full_addr = f"{raw_addr}, {raw_city}, {raw_zip}"
+        full_addr = re.sub(r"\s{2,}", " ", full_addr)
         results_url = (
             "https://www.truepeoplesearch.com/results?name=&citystatezip="
             + quote_plus(full_addr)
