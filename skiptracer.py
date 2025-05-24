@@ -104,7 +104,7 @@ def create_task(full_addr: str, timeout: int = 120) -> str:
             raise
     raise RuntimeError("Failed to create task")
 
-def poll_task(task_id: str, timeout: int = 120) -> str:
+def poll_task(task_id: str, timeout: int = 120, *, visible: bool = False) -> str:
     url = RESULT_URL.format(task_id)
     while True:
         try:
@@ -119,8 +119,16 @@ def poll_task(task_id: str, timeout: int = 120) -> str:
             status = data.get("status")
             print(f"🔄 {task_id} status={status} HTTP={status_code}")
             if status == "completed":
-                html = data.get("content") or data.get("html") or data.get("result") or ""
-                print(html[:300])
+                html = (
+                    data.get("content")
+                    or data.get("html")
+                    or data.get("result")
+                    or ""
+                )
+                if visible:
+                    print(html)
+                else:
+                    print(html[:500])
                 return html
             if status == "failed":
                 raise RuntimeError(f"Task {task_id} failed")
@@ -156,6 +164,11 @@ def main() -> None:
         default=120,
         help="Timeout in seconds for HTTP requests",
     )
+    parser.add_argument(
+        "--visible",
+        action="store_true",
+        help="Print the entire HTML response instead of just a snippet",
+    )
     args = parser.parse_args()
 
     df = pd.read_csv("input.csv")
@@ -164,7 +177,11 @@ def main() -> None:
         full_addr = f"{row['Address']}, {row['City']}, {row['StateZip']}"
         try:
             task_id = create_task(full_addr, timeout=args.request_timeout)
-            html = poll_task(task_id, timeout=args.request_timeout)
+            html = poll_task(
+                task_id,
+                timeout=args.request_timeout,
+                visible=args.visible,
+            )
             data = parse_html(html)
         except Exception as exc:
             data = {
