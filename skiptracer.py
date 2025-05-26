@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 load_dotenv()
 DECODO_USERNAME = os.getenv("DECODO_USERNAME")
 DECODO_PASSWORD = os.getenv("DECODO_PASSWORD")
+DECODO_API_TOKEN = os.getenv("DECODO_API_TOKEN")
 if not DECODO_USERNAME or not DECODO_PASSWORD:
     raise RuntimeError("DECODO_USERNAME / DECODO_PASSWORD not set")
 
@@ -34,6 +35,40 @@ def _normalize_phone(num: str) -> str:
 
 def _parse_phones(text: str) -> List[str]:
     return sorted({ _normalize_phone(m) for m in PHONE_RE.findall(text or "") })
+
+def fetch_tps_via_decodo(address, timeout):
+    """
+    Return raw HTML for a TruePeopleSearch results page using Decodo.
+    No JS rendering, no extra params — exactly as support tested.
+    """
+    from urllib.parse import quote_plus
+    import os, json, requests, logging
+
+    token = os.getenv("DECODO_API_TOKEN")
+    if not token:
+        raise RuntimeError("DECODO_API_TOKEN not set")
+
+    url = (
+        "https://www.truepeoplesearch.com/results?"
+        f"name=&citystatezip={quote_plus(address)}"
+    )
+    payload = {"target": "universal", "url": url}
+    headers = {
+        "Authorization": f"Basic {token}",
+        "Content-Type": "application/json",
+        "User-Agent": "skiptracer/1.0 (+https://github.com/freedom-crm)"
+    }
+    logging.debug("\U0001f4e1 Decodo POST %s", payload)
+    r = requests.post(
+        "https://scraper-api.decodo.com/v2/scrape",
+        headers=headers,
+        data=json.dumps(payload),
+        timeout=timeout,
+    )
+    logging.debug("\U0001f6e0  Decodo response %s bytes %s",
+                  r.status_code, len(r.text))
+    r.raise_for_status()
+    return r.text
 
 # ── FETCH ───────────────────────────────────────────────────────────────────────
 def fetch_url(url: str, *, timeout: int = 150, visible: bool=False) -> str:
@@ -102,6 +137,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Batch skip-tracer via Decodo")
     ap.add_argument("--request-timeout", type=int, default=150, help="HTTP timeout seconds")
     ap.add_argument("--visible", action="store_true", help="Print full HTML")
+    ap.add_argument("--no-decodo", action="store_true", help="Force Selenium fallback")
     args = ap.parse_args()
 
     df       = pd.read_csv("input.csv")
@@ -117,7 +153,15 @@ def main() -> None:
         )
 
         try:
-            html  = fetch_url(target_url, timeout=args.request_timeout, visible=args.visible)
+            if args.no_decodo:
+                html = fetch_url(target_url, timeout=args.request_timeout, visible=args.visible)
+            else:
+                try:
+                    html = fetch_tps_via_decodo(full_addr, timeout=args.request_timeout)
+                except Exception as dec_exc:
+                    print(f"⚠️ Decodo failed: {dec_exc} – falling back")
+                    html = fetch_url(target_url, timeout=args.request_timeout, visible=args.visible)
+
             data  = extract_data(html, timeout=args.request_timeout, visible=args.visible)
         except Exception as exc:
             data = {"Result Name":"","Result Address":"","Phone Numbers":"",
