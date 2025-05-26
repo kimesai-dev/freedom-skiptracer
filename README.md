@@ -15,6 +15,7 @@ Create a `.env` file containing your Decodo credentials:
 ```bash
 DECODO_USERNAME=<your username>
 DECODO_PASSWORD=<your password>
+DECODO_API_TOKEN=<basic token>
 ```
 
 ## Usage
@@ -29,7 +30,7 @@ Populate `input.csv` with three columns named `Address`, `City` and
 Run the script with:
 
 ```bash
-python skiptracer.py [--request-timeout SECONDS] [--visible]
+python skiptracer.py [--request-timeout SECONDS] [--visible] [--no-decodo]
 ```
 Running this command generates an `output.csv` file in the same directory. The
 script writes the scraped owner name, address, and phone numbers for each row to this
