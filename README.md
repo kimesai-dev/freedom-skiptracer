@@ -10,12 +10,10 @@ Install the dependencies with pip:
 pip install -r requirements.txt
 ```
 
-Create a `.env` file containing your Decodo credentials:
+Create a `.env` file containing your Decodo API token:
 
 ```bash
-DECODO_USERNAME=<your username>
-DECODO_PASSWORD=<your password>
-DECODO_API_TOKEN=<basic token>
+DECODO_API_TOKEN=<your token>
 ```
 
 ## Usage
@@ -30,7 +28,7 @@ Populate `input.csv` with three columns named `Address`, `City` and
 Run the script with:
 
 ```bash
-python skiptracer.py [--request-timeout SECONDS] [--visible] [--no-decodo]
+python skiptracer.py [--request-timeout SECONDS] [--visible]
 ```
 Running this command generates an `output.csv` file in the same directory. The
 script writes the scraped owner name, address, and phone numbers for each row to this
@@ -38,22 +36,12 @@ file, overwriting any existing content. Use `--request-timeout` to change the HT
 
 ### Decodo API Request
 
-The scraper sends a POST request to Decodo for each address using a payload similar to:
+The scraper sends a POST request to Decodo using only two fields:
 
 ```json
-{
-  "url": "https://www.truepeoplesearch.com/results?name=&citystatezip=IN+47371",
-  "headless": "html",
-  "http_method": "GET",
-  "geo": "US",
-  "locale": "en-US",
-  "session_id": "tsp-session-1",
-  "wait_for": "networkidle",
-  "render_wait_time_ms": 6000
-}
+{"target": "universal", "url": "https://www.truepeoplesearch.com/results?name=&citystatezip=IN+47371"}
 ```
-Requests use HTTP basic authentication with the credentials from your `.env` file. Each
-task is polled until completion using `GET /v2/task/{id}/results`.
+The `DECODO_API_TOKEN` is used for basic authentication.
 
 Example command with a custom timeout:
 
