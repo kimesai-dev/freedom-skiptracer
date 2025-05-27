@@ -1,26 +1,41 @@
 #!/usr/bin/env python3
 """Skip tracing TruePeopleSearch via Decodo Web-Scraping API (real-time flow-B)."""
 
-import os, re, time, argparse, json
+import os, re, time, argparse, json, logging
 from typing import Dict, List
 from urllib.parse import quote_plus
+from pathlib import Path
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except Exception as exc:
+    raise SystemExit(
+        "python-dotenv is required. Install via 'pip install python-dotenv'"
+    ) from exc
 
 # ── ENV ─────────────────────────────────────────────────────────────────────────
-load_dotenv()
 # Optional: directly place your Decodo API token in this variable
 _BUILTIN_DECODO_API_TOKEN = ""
 
-# Read from environment first, then fallback to the builtin token
-DECODO_API_TOKEN = os.getenv("DECODO_API_TOKEN") or _BUILTIN_DECODO_API_TOKEN
-if not DECODO_API_TOKEN:
-    raise RuntimeError("DECODO_API_TOKEN not set")
+# Token resolved at runtime via get_decodo_token()
+DECODO_API_TOKEN: str | None = None
 
 SCRAPE_URL = "https://scraper-api.decodo.com/v2/scrape"
 PHONE_RE    = re.compile(r"\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}")
+def get_decodo_token(cli_arg: str | None) -> str:
+    token = (
+        cli_arg
+        or os.getenv("DECODO_API_TOKEN")
+        or os.getenv("DECODO_API_KEY")
+        or _BUILTIN_DECODO_API_TOKEN
+    )
+    if not token:
+        raise RuntimeError("Decodo API token not found. Set DECODO_API_TOKEN in .env or pass --api-token")
+    if logging.getLogger().isEnabledFor(logging.DEBUG):
+        logging.debug(f"Using Decodo token {token[:4]}****")
+    return token
 
 # ── HELPERS ─────────────────────────────────────────────────────────────────────
 def _normalize_phone(num: str) -> str:
@@ -36,7 +51,9 @@ def fetch_tps_via_decodo(address: str, timeout: int) -> str:
 
     token = DECODO_API_TOKEN
     if not token:
-        raise RuntimeError("DECODO_API_TOKEN not set")
+        raise RuntimeError(
+            "Decodo API token not found. Set DECODO_API_TOKEN in .env or pass --api-token"
+        )
 
     url = (
         "https://www.truepeoplesearch.com/results"
@@ -73,8 +90,13 @@ def fetch_url(url: str, *, timeout: int = 150, visible: bool = False) -> str:
         raise ValueError(f"Extra Decodo params detected: {forbidden}")
 
     print(f"📡 Payload: {payload}")
+    token = DECODO_API_TOKEN
+    if not token:
+        raise RuntimeError(
+            "Decodo API token not found. Set DECODO_API_TOKEN in .env or pass --api-token"
+        )
     headers = {
-        "Authorization": f"Basic {DECODO_API_TOKEN}",
+        "Authorization": f"Basic {token}",
         "Content-Type": "application/json",
         "User-Agent": "skiptracer/1.0",
     }
@@ -124,7 +146,13 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Batch skip-tracer via Decodo")
     ap.add_argument("--request-timeout", type=int, default=150, help="HTTP timeout seconds")
     ap.add_argument("--visible", action="store_true", help="Print full HTML")
+    ap.add_argument("--api-token", help="Decodo API token")
     args = ap.parse_args()
+
+    load_dotenv(dotenv_path=Path(__file__).parent / ".env")
+
+    global DECODO_API_TOKEN
+    DECODO_API_TOKEN = get_decodo_token(args.api_token)
 
     df       = pd.read_csv("input.csv")
     results  = []
