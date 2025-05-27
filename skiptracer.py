@@ -11,7 +11,11 @@ from dotenv import load_dotenv
 
 # ── ENV ─────────────────────────────────────────────────────────────────────────
 load_dotenv()
-DECODO_API_TOKEN = os.getenv("DECODO_API_TOKEN")
+# Optional: directly place your Decodo API token in this variable
+_BUILTIN_DECODO_API_TOKEN = ""
+
+# Read from environment first, then fallback to the builtin token
+DECODO_API_TOKEN = os.getenv("DECODO_API_TOKEN") or _BUILTIN_DECODO_API_TOKEN
 if not DECODO_API_TOKEN:
     raise RuntimeError("DECODO_API_TOKEN not set")
 
@@ -28,9 +32,9 @@ def _parse_phones(text: str) -> List[str]:
 
 def fetch_tps_via_decodo(address: str, timeout: int) -> str:
     from urllib.parse import quote_plus
-    import os, json, requests, logging
+    import json, requests, logging
 
-    token = os.getenv("DECODO_API_TOKEN")
+    token = DECODO_API_TOKEN
     if not token:
         raise RuntimeError("DECODO_API_TOKEN not set")
 
