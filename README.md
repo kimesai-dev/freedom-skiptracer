@@ -10,7 +10,8 @@ Install the dependencies with pip:
 pip install -r requirements.txt
 ```
 
-Create a `.env` file containing your Decodo API token:
+Create a `.env` file containing your Decodo API token (or edit `skiptracer.py`
+and place your token in `_BUILTIN_DECODO_API_TOKEN`):
 
 ```bash
 DECODO_API_TOKEN=<your token>
